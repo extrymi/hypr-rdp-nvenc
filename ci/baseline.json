@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "upstream": {
+    "repository": "MuNeNiCK/hypr-rdp",
+    "commit": "730020b8795b6f6a57a69f441414a80d2a8505d5",
+    "version": "0.1.7"
+  },
+  "rust": {
+    "channel": "1.99.1",
+    "release_commit": "58cf8f9c35b355199727627d07ae34a4e2846d67",
+    "target": "x86_64-unknown-linux-gnu"
+  },
+  "ironrdp_revision": "3db08ba86983ce35c9d36ad33f59ceb4b607dce8",
+  "cargo_lock_sha256": "a4c758d118de4e12d8e0f5470e1689cdbc743de85b99ad9bae2d82fb728dde27",
+  "cargo_toml_sha256": "a3ba10086c87477cffd76fd5b31180346e2a1d859a745c5f52554ccf4fb9a0bd",
+  "locked_packages": 484,
+  "runner": "ubuntu-24.04",
+  "actions": {
+    "actions/checkout": {
+      "version": "v7.0.1",
+      "commit": "3d3c42e5aac5ba805825da76410c181273ba90b1"
+    },
+    "actions/upload-artifact": {
+      "version": "v7.0.2",
+      "commit": "cf430e030ddbb5b0abf93d22962f4752f3646cd9"
+    }
+  },
+  "feature_sets": [
+    {
+      "name": "default",
+      "cargo_args": []
+    },
+    {
+      "name": "software-only",
+      "cargo_args": [
+        "--no-default-features"
+      ]
+    },
+    {
+      "name": "software-with-file-clipboard",
+      "cargo_args": [
+        "--no-default-features",
+        "--features",
+        "client-to-server"
+      ]
+    }
+  ],
+  "scope": "CPU build and upstream tests; no NVENC implementation, live desktop or hardware qualification"
+}
