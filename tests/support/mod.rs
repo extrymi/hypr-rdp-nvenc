@@ -23,6 +23,7 @@ pub enum Scenario {
     Hang(Phase),
     HangAllocate,
     HangOutput,
+    HangRelease,
 }
 
 pub type Events = Arc<Mutex<Vec<String>>>;
@@ -147,6 +148,9 @@ impl Driver for FakeDriver {
     }
     fn release(&mut self, slot: usize) -> Result<(), Error> {
         self.record(format!("release:{slot}"));
+        if self.scenario == Scenario::HangRelease {
+            stall();
+        }
         if self.scenario == Scenario::FailRelease {
             return Err(Error::backend(Phase::Destroy, Fault::Driver));
         }

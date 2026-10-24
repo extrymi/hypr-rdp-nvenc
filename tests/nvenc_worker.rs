@@ -128,6 +128,11 @@ fn fixture_destroy() {
 }
 #[test]
 #[ignore = "subprocess fixture"]
+fn fixture_release() {
+    run(Scenario::HangRelease);
+}
+#[test]
+#[ignore = "subprocess fixture"]
 fn fixture_exit() {
     run(Scenario::Hang(Phase::Exit));
 }
@@ -311,6 +316,7 @@ async fn drain_destroy_and_exit_hangs_are_killed_without_blocking_shutdown() {
     for (fixture, phase) in [
         ("fixture_drain", Phase::Drain),
         ("fixture_destroy", Phase::Destroy),
+        ("fixture_release", Phase::Destroy),
         ("fixture_exit", Phase::Exit),
     ] {
         let mut worker = start(fixture, &dir, config()).await.unwrap();

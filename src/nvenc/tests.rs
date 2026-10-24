@@ -278,7 +278,7 @@ fn protocol_rejects_bad_versions_trailing_bytes_and_oversized_prefixes() {
     assert!(protocol::decode(b"HNV2\0").is_err());
     assert!(protocol::decode(b"HNV1\0extra").is_err());
     for length in [0, 4, u32::MAX] {
-        let bytes = (length as u32).to_le_bytes();
+        let bytes = length.to_le_bytes();
         assert!(protocol::read(&mut &bytes[..], protocol::OVERHEAD).is_err());
     }
     let packet = protocol::encode(&protocol::Message::Init(config())).unwrap();

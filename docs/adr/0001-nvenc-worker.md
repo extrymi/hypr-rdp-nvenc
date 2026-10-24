@@ -62,6 +62,9 @@ or isolate Hyprland from faults in a shared GPU. Tests use fake drivers only.
   allocation cleans its own partial objects; destroy tolerates partial init.
 - A generation accepts consecutive sequence numbers starting at0. Every reply
   echoes epoch and sequence. Stale replies are fatal and never become video.
+- Cancelling an encode/shutdown future makes the generation terminal before
+  the first await. Later calls cannot resubmit ambiguous input or repeat drain;
+  explicit shutdown still performs bounded termination and reap.
 - Only `Busy` means input was not accepted; at most two retries are allowed.
   `Delayed` means accepted input and terminates this zero-delay MVP with a typed
   error. It causes neither resubmission nor an output-lock wait.
@@ -116,7 +119,7 @@ library target, with no Cargo dependency/lockfile changes. The current RDP binar
 has no entry point into this library and loads no NVIDIA libraries.
 
 Subprocess fixtures exercise hangs at startup, probe, init, allocation, submit,
-output, drain, destroy and process exit. They also exercise non-reading peers,
+output, drain, buffer release, destroy and process exit. They also exercise non-reading peers,
 partial/oversized replies, stale epochs, terminal failure after N frames, and
 repeated cleanup. Ignored `fixture_*` test entries are invoked explicitly by
 their parent integration tests. They must not be run directly outside that setup.

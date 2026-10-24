@@ -52,8 +52,8 @@ impl Config {
             || self.height == 0
             || self.width > 8192
             || self.height > 8192
-            || self.width % 2 != 0
-            || self.height % 2 != 0
+            || !self.width.is_multiple_of(2)
+            || !self.height.is_multiple_of(2)
             || self.fps == 0
             || self.fps > 240
             || self.bitrate == 0
