@@ -71,7 +71,11 @@ impl Drop for Fixture {
         let remaining = unsafe { hypr_mock_resources() };
         if !std::thread::panicking() {
             assert_eq!(remaining, 0, "{}", self.trace());
-            assert!(!self.trace().contains("destroy-before-eos"), "{}", self.trace());
+            assert!(
+                !self.trace().contains("destroy-before-eos"),
+                "{}",
+                self.trace()
+            );
         }
         unsafe { hypr_mock_reset(0, c"".as_ptr(), 0) };
     }
