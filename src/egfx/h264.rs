@@ -519,7 +519,7 @@ fn apply_sps_pps_cache(
     }
 }
 
-pub(super) fn annex_b_nal_types(data: &[u8]) -> Vec<u8> {
+pub(crate) fn annex_b_nal_types(data: &[u8]) -> Vec<u8> {
     let mut types = Vec::new();
     let mut i = 0;
 
