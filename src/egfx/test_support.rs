@@ -75,7 +75,7 @@ pub(crate) struct GfxPduTrace {
 }
 
 impl GfxPduTrace {
-    pub(in crate::egfx) fn as_slice(&self) -> &[GfxPdu] {
+    pub(crate) fn as_slice(&self) -> &[GfxPdu] {
         &self.pdus
     }
 

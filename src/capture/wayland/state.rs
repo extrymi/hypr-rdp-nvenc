@@ -45,6 +45,7 @@ pub(super) struct AppState {
     pub(super) buffer_width: u32,
     pub(super) buffer_height: u32,
     pub(super) wlr_stride: u32,
+    pub(super) wlr_flags: u32,
     pub(super) shm_format: Option<wl_shm::Format>,
     // DMA-BUF session state
     #[cfg(feature = "vaapi")]
@@ -87,6 +88,7 @@ impl AppState {
             buffer_width: 0,
             buffer_height: 0,
             wlr_stride: 0,
+            wlr_flags: 0,
             shm_format: None,
             #[cfg(feature = "vaapi")]
             dmabuf_device: None,
@@ -342,6 +344,12 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, ()> for AppState 
                     state.wlr_stride = stride;
                     state.shm_format = Some(format);
                 }
+            }
+            zwlr_screencopy_frame_v1::Event::Flags { flags } => {
+                state.wlr_flags = match flags {
+                    WEnum::Value(flags) => flags.bits(),
+                    WEnum::Unknown(bits) => bits,
+                };
             }
             zwlr_screencopy_frame_v1::Event::Ready { .. } => {
                 state.frame_ready = true;

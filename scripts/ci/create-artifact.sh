@@ -6,13 +6,13 @@ mkdir -p artifacts/build-output
 cp target/release/hypr-rdp artifacts/build-output/
 cp LICENSE README.md Cargo.toml Cargo.lock rust-toolchain.toml artifacts/build-output/
 cp ci/baseline.json artifacts/build-output/
-cp docs/native-nvenc.md docs/startup-validation.md artifacts/build-output/
+cp docs/native-nvenc.md docs/nvenc-integration.md docs/startup-validation.md artifacts/build-output/
 mkdir -p artifacts/build-output/vendor
 cp -r vendor/nv-codec-headers artifacts/build-output/vendor/
 cat > artifacts/build-output/NOT-FOR-DEPLOYMENT.txt <<'NOTICE'
 CPU development build of the hypr-rdp fork, based on upstream 0.1.7.
-Source includes an optional native NVENC library adapter. It is not yet wired
-to desktop server capture/EGFX or exposed as a production encoder option.
+The optional native NVENC worker/capture/AVC420 integration is compiled in.
+Its GPU/driver/client behavior remains unqualified; see nvenc-integration.md.
 The NVIDIA driver and CUDA runtime are not bundled.
 It is not an Arch package and has not passed GPU, live-desktop, PAM, network,
 Windows/macOS or installation/removal qualification. Do not treat it as the
@@ -26,7 +26,7 @@ if grep -E 'NEEDED.*lib(avcodec|avformat|avutil|swscale|swresample|openh264|cuda
 fi
 (
   cd artifacts/build-output
-  sha256sum hypr-rdp LICENSE README.md Cargo.toml Cargo.lock rust-toolchain.toml baseline.json NOT-FOR-DEPLOYMENT.txt native-nvenc.md startup-validation.md vendor/nv-codec-headers/* > SHA256SUMS
+  sha256sum hypr-rdp LICENSE README.md Cargo.toml Cargo.lock rust-toolchain.toml baseline.json NOT-FOR-DEPLOYMENT.txt native-nvenc.md nvenc-integration.md startup-validation.md vendor/nv-codec-headers/* > SHA256SUMS
 )
 tar -czf artifacts/cpu-baseline-linux-x86_64.tar.gz -C artifacts/build-output .
 rm -r artifacts/build-output

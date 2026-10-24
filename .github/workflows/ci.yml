@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main, codex/cpu-baseline, codex/nvenc-lifecycle, codex/startup-validation]
+    branches: [main, codex/cpu-baseline, codex/nvenc-lifecycle, codex/startup-validation, codex/native-nvenc]
 
 permissions:
   contents: read
@@ -72,8 +72,8 @@ jobs:
 
       - name: Test generated native ABI and independent CPU driver API
         run: |
-          cargo test --frozen --features nvenc --lib 2>&1 | tee artifacts/test-native.log
-          cargo test --frozen --no-default-features --features nvenc --lib 2>&1 | tee artifacts/test-native-software.log
+          cargo test --frozen --features nvenc 2>&1 | tee artifacts/test-native.log
+          cargo test --frozen --no-default-features --features nvenc 2>&1 | tee artifacts/test-native-software.log
 
       - name: Test NVENC lifecycle with concurrent process creation
         run: |

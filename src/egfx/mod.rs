@@ -5,6 +5,12 @@ mod clearcodec;
 mod factory;
 mod frame;
 mod h264;
+#[cfg(feature = "nvenc")]
+mod nvenc;
+#[cfg(all(test, feature = "nvenc"))]
+pub(crate) use h264::annex_b_nal_types;
+#[cfg(all(test, feature = "nvenc"))]
+pub(crate) use nvenc::tests::test_encoder as nvenc_test_encoder;
 mod output_queue;
 mod rdpegfx;
 mod shared;

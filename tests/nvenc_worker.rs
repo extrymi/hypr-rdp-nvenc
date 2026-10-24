@@ -13,7 +13,8 @@ use std::{
 };
 
 use hypr_rdp::nvenc::{
-    serve, Config, Deadlines, DeviceLease, Error, Fault, Frame, Phase, Stamp, Worker, WORKER_FD,
+    serve, BlockingWorker, Config, Deadlines, DeviceLease, Error, Fault, Frame, Phase, Stamp,
+    Worker, WORKER_FD,
 };
 use support::{config, stall, FakeDriver, Scenario};
 
@@ -48,6 +49,63 @@ fn deadlines() -> Deadlines {
         exit: Duration::from_millis(150),
         reap: Duration::from_secs(2),
     }
+}
+
+fn blocking_start(name: &str, dir: &RuntimeDir, cfg: Config) -> Result<BlockingWorker, Error> {
+    let mut command = tokio::process::Command::new(std::env::current_exe().unwrap());
+    command.args(["--exact", name, "--ignored", "--test-threads=1"]);
+    BlockingWorker::spawn(command, &dir.0, cfg, deadlines())
+}
+
+#[test]
+fn blocking_capture_facade_preserves_identity_and_releases_before_recreate() {
+    let dir = RuntimeDir::new();
+    let input = vec![42; config().frame_bytes().unwrap()];
+    let mut worker = blocking_start("fixture_normal", &dir, config()).unwrap();
+    for sequence in 0..3 {
+        let frame = worker.encode(&input, sequence == 2).unwrap();
+        assert_eq!(
+            frame.stamp,
+            Stamp {
+                epoch: 17,
+                sequence
+            }
+        );
+        assert_eq!(frame.unit.is_idr, sequence == 0 || sequence == 2);
+    }
+    worker.shutdown().unwrap();
+    assert!(worker.was_reaped());
+    let mut next = config();
+    next.epoch += 1;
+    let mut worker = blocking_start("fixture_normal", &dir, next).unwrap();
+    assert_eq!(worker.encode(&input, false).unwrap().stamp.epoch, 18);
+    worker.shutdown().unwrap();
+}
+
+#[test]
+fn blocking_capture_timeout_is_terminal_and_reaps_before_reuse() {
+    let dir = RuntimeDir::new();
+    let input = vec![42; config().frame_bytes().unwrap()];
+    let mut worker = blocking_start("fixture_encode", &dir, config()).unwrap();
+    assert_eq!(
+        worker.encode(&input, false),
+        Err(Error::Timeout(Phase::Encode))
+    );
+    assert!(worker.was_reaped());
+    assert_eq!(worker.encode(&input, false), Err(Error::Closed));
+    drop(worker);
+    let mut replacement = blocking_start("fixture_normal", &dir, config()).unwrap();
+    replacement.shutdown().unwrap();
+}
+
+#[tokio::test]
+async fn blocking_facade_rejects_executor_context_before_creating_state() {
+    let dir = RuntimeDir::new();
+    assert!(matches!(
+        blocking_start("fixture_normal", &dir, config()),
+        Err(Error::InvalidConfig)
+    ));
+    assert!(!dir.0.exists());
 }
 
 async fn start(name: &str, directory: &RuntimeDir, cfg: Config) -> Result<Worker, Error> {

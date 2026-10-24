@@ -1,8 +1,8 @@
 # Native NVENC adapter
 
-This stage implements the library Driver from ADR0001. It does not yet expose
-NVENC in the desktop server's CLI or connect capture/EGFX to it. Enable the
-internal `nvenc` build feature to compile the adapter and its ABI tests.
+This stage implements the library Driver from ADR0001. The following server
+integration stage is documented in [nvenc-integration.md](nvenc-integration.md).
+Enable the optional `nvenc` build feature to compile the backend and ABI tests.
 No workstation build, GPU probe, driver invocation or installation is required.
 
 ## Boundaries
@@ -97,8 +97,8 @@ cargo clippy --frozen --all-targets --all-features -- -D warnings
 ```
 
 The draft PR and its CI logs record the actual validation of each commit.
-Hardware qualification, production worker dispatch, capture conversion,
-strict RDP/EGFX failure propagation and real Windows/Linux/macOS remain open.
+Production dispatch/capture/EGFX CPU integration is described separately.
+Hardware qualification and real Windows/Linux/macOS remain open.
 
 ## Sources and licenses
 

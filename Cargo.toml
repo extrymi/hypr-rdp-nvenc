@@ -12,7 +12,7 @@ license = "MIT"
 default = ["vaapi", "client-to-server"]
 vaapi = ["dep:libva-sys"]
 client-to-server = ["dep:fuser"]
-# Native library adapter only; production capture/EGFX dispatch is a later stage.
+# Optional native AVC420 backend with a private supervised worker.
 nvenc = ["dep:libloading", "dep:cc"]
 
 [dependencies]

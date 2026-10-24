@@ -32,7 +32,6 @@ installation or test run on the working desktop is required by this stage.
 
 The native Driver is implemented behind the optional `nvenc` feature; see
 [native adapter](native-nvenc.md) for its ABI checks, CPU tests and limitations.
-Next connect the same-executable hidden worker entry point, configuration
-and EGFX policy. Do not expose `nvenc` as a working server option before those
-paths and strict failure propagation exist. Existing authorization/TLS remain
-in the server; configuration error handling is a separate, narrowly scoped patch.
+The same-executable worker/configuration/capture/EGFX integration is documented in
+[nvenc-integration.md](nvenc-integration.md). All new paths remain optional and
+hardware unqualified. Existing authorization/TLS remain in the server.

@@ -62,8 +62,8 @@ pub struct Worker {
 impl Worker {
     /// The production caller must pass the same package executable with its
     /// private worker argument. An injected Command also permits CPU fixtures
-    /// to exercise actual subprocess hangs. No production entry point is wired
-    /// yet. The child gets no inherited environment, stdin, stdout or stderr;
+    /// to exercise actual subprocess hangs. The child gets no inherited
+    /// environment, stdin, stdout or stderr;
     /// only a fixed internal worker marker is added to its fresh environment.
     pub async fn spawn(
         mut command: Command,
@@ -317,7 +317,7 @@ impl Worker {
 
 /// Blocking worker loop. Driver construction must be inert; the first probe
 /// happens only after Init, after its identity marker has been persisted.
-/// A future native driver is constructed and used on this same OS thread.
+/// The native driver is constructed and used on this same OS thread.
 pub fn serve<D: Driver>(mut stream: StdStream, driver: D) -> Result<(), Error> {
     protocol::write(&mut stream, &Message::Hello)?;
     let config = match protocol::read(&mut stream, OVERHEAD)? {
