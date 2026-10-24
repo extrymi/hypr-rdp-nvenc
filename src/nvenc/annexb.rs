@@ -19,6 +19,8 @@ struct Parameters {
     pps_id: u32,
     width: u32,
     height: u32,
+    // PPS entropy_coding_mode_flag: only CABAC slices may end in cabac_zero_word.
+    cabac: bool,
 }
 
 impl AnnexB {
@@ -59,18 +61,20 @@ impl AnnexB {
                     if slice.is_some() || fresh_pps.is_some() {
                         return Err(invalid());
                     }
-                    let mut bits = Bits::new(nal)?;
+                    let mut bits = Bits::new(nal, false)?;
                     let pps_id = bits.ue()?;
                     let sps_id = bits.ue()?;
+                    let cabac = bits.take(1)? == 1;
                     if pps_id > 255 || sps_id > 31 {
                         return Err(invalid());
                     }
-                    fresh_pps = Some((pps_id, sps_id, nal.to_vec()));
+                    fresh_pps = Some((pps_id, sps_id, cabac, nal.to_vec()));
                 }
                 kind @ (1 | 5) => {
                     if fresh_sps.is_some() || fresh_pps.is_some() {
                         let (sps_id, sps) = fresh_sps.take().ok_or_else(invalid)?;
-                        let (pps_id, referenced_sps, pps) = fresh_pps.take().ok_or_else(invalid)?;
+                        let (pps_id, referenced_sps, cabac, pps) =
+                            fresh_pps.take().ok_or_else(invalid)?;
                         if referenced_sps != sps_id {
                             return Err(invalid());
                         }
@@ -81,13 +85,14 @@ impl AnnexB {
                             pps_id,
                             width,
                             height,
+                            cabac,
                         });
                     }
                     let p = parameters.as_ref().ok_or_else(invalid)?;
                     if p.width != width || p.height != height || p.sps_id > 31 {
                         return Err(invalid());
                     }
-                    let mut bits = Bits::new(nal)?;
+                    let mut bits = Bits::new(nal, p.cabac)?;
                     let first_mb = bits.ue()?;
                     let slice_type = bits.ue()?;
                     let pps = bits.ue()?;
@@ -215,13 +220,17 @@ struct Bits {
     position: usize,
 }
 impl Bits {
-    fn new(nal: &[u8]) -> Result<Self, Error> {
+    /// `cabac_slice`: H.264 7.4.1/7.3.2.10 append a final emulation prevention
+    /// byte only when a CABAC slice RBSP ends in cabac_zero_word (0x0000).
+    fn new(nal: &[u8], cabac_slice: bool) -> Result<Self, Error> {
         let mut rbsp = Vec::with_capacity(nal.len());
         let mut zeros = 0;
         for (index, &byte) in nal[1..].iter().enumerate() {
             if zeros >= 2 && byte == 3 {
-                if nal.get(index + 2).is_none_or(|next| *next > 3) {
-                    return Err(invalid());
+                match nal.get(index + 2) {
+                    Some(next) if *next <= 3 => {}
+                    None if cabac_slice => {}
+                    _ => return Err(invalid()),
                 }
                 zeros = 0;
                 continue;
@@ -270,7 +279,7 @@ impl Bits {
 }
 
 fn sps(nal: &[u8]) -> Result<(u32, u32, u32), Error> {
-    let mut b = Bits::new(nal)?;
+    let mut b = Bits::new(nal, false)?;
     let profile = b.take(8)?;
     b.take(16)?; // Constraint flags and level_idc.
     let id = b.ue()?;
@@ -384,6 +393,72 @@ mod tests {
             &b"\x67\x42\x00\x29\xf4\x04\x04\xf0\x1c\x3a"[..],
         ] {
             assert!(super::sps(nal).is_err());
+        }
+    }
+
+    /// Independent NAL encapsulation from H.264 (V16) 7.4.1, step 1: insert 0x03
+    /// before 0x00..=0x03 after two zero bytes, then append a final 0x03 when
+    /// the RBSP ends in 0x00. It shares no code with `Bits::new`.
+    fn encapsulate(header: u8, rbsp: &[u8]) -> Vec<u8> {
+        let mut nal = vec![header];
+        let mut zeros = 0;
+        for &byte in rbsp {
+            if zeros >= 2 && byte <= 3 {
+                nal.push(3);
+                zeros = 0;
+            }
+            nal.push(byte);
+            zeros = if byte == 0 { zeros + 1 } else { 0 };
+        }
+        if rbsp.last() == Some(&0) {
+            nal.push(3);
+        }
+        nal
+    }
+
+    #[test]
+    fn final_emulation_byte_is_accepted_only_after_a_cabac_slice_zero_word() {
+        // 0x80: rbsp_stop_one_bit plus alignment; then k cabac_zero_words.
+        for k in 1..=3 {
+            let rbsp = [&[0x88, 0x84, 0x80][..], &vec![0; 2 * k][..]].concat();
+            for header in [0x65, 0x41] {
+                let nal = encapsulate(header, &rbsp);
+                assert!(nal.ends_with(&[0, 0, 3]));
+                assert_eq!(super::Bits::new(&nal, true).unwrap().rbsp, rbsp);
+                assert!(super::Bits::new(&nal, false).is_err(), "CAVLC/SPS/PPS");
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_or_truncated_emulation_sequences_stay_rejected() {
+        for nal in [
+            &[0x65, 0x88, 0x00, 0x00, 0x03, 0x04][..], // 0x000003 + byte > 3 (7.4.1)
+            &[0x65, 0x88, 0x00, 0x00, 0x00, 0x80],      // 0x000000
+            &[0x65, 0x88, 0x00, 0x00, 0x01, 0x80],      // 0x000001
+            &[0x65, 0x88, 0x00, 0x00, 0x02, 0x80],      // 0x000002
+            &[0x65, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00], // escaped, then raw 0x000000
+            &[0x65],                                     // empty RBSP
+        ] {
+            assert!(super::Bits::new(nal, true).is_err(), "{nal:02x?}");
+        }
+        // A trailing 0x03 after a single zero is data, not an emulation byte.
+        let data = super::Bits::new(&[0x65, 0x88, 0x00, 0x03], false).unwrap();
+        assert_eq!(data.rbsp, [0x88, 0x00, 0x03]);
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn encapsulated_rbsp_round_trips(
+            body in proptest::collection::vec(proptest::prelude::any::<u8>(), 0..256),
+            stop in 1u8..=255,
+            zero_words in 0usize..4,
+        ) {
+            // A slice RBSP ends in a nonzero trailing-bits byte, then cabac_zero_words.
+            let rbsp = [&body[..], &[stop][..], &vec![0; 2 * zero_words][..]].concat();
+            let nal = encapsulate(0x65, &rbsp);
+            proptest::prop_assert_eq!(super::Bits::new(&nal, true).unwrap().rbsp, rbsp.clone());
+            proptest::prop_assert_eq!(super::Bits::new(&nal, false).is_ok(), zero_words == 0);
         }
     }
 }
