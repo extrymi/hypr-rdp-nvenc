@@ -114,7 +114,7 @@ impl Driver for CpuDriver {
             width: config.width as usize,
             height: config.height as usize,
         };
-        for uv in frame.nv12[size..].chunks_exact(2) {
+        for uv in frame.nv12[size..].as_chunks::<2>().0.iter() {
             source.u.push(uv[0]);
             source.v.push(uv[1]);
         }
@@ -180,7 +180,7 @@ fn nv12_conversion_uses_full_range_bt709_and_interleaves_uv_with_padding() {
         let stride = cfg.width as usize * 4 + 32;
         let mut bytes = vec![0xED; stride * cfg.height as usize];
         for row in bytes.chunks_exact_mut(stride) {
-            for p in row[..cfg.width as usize * 4].chunks_exact_mut(4) {
+            for p in row[..cfg.width as usize * 4].as_chunks_mut::<4>().0.iter_mut() {
                 p.copy_from_slice(&pixel);
             }
         }
@@ -191,7 +191,9 @@ fn nv12_conversion_uses_full_range_bt709_and_interleaves_uv_with_padding() {
             .iter()
             .all(|y| (i16::from(*y) - expected[0]).abs() <= 2));
         assert!(nv12[y_size..]
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .all(|uv| (i16::from(uv[0]) - expected[1]).abs() <= 2
                 && (i16::from(uv[1]) - expected[2]).abs() <= 2));
         assert!(pixels.convert(&bytes[..4], stride).is_err());

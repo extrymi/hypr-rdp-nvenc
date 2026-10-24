@@ -1211,10 +1211,10 @@ mod tests {
                 .unwrap();
                 let mut decoder = openh264::decoder::Decoder::new().unwrap();
                 use openh264::formats::YUVSource;
-                let frame = decoder.decode(&stream.data).unwrap().unwrap();
+                let frame = decoder.decode(stream.data).unwrap().unwrap();
                 assert_eq!(frame.dimensions(), (64, 64));
                 assert!((i16::from(frame.y()[0]) - 182).abs() <= 4);
-                assert!(crate::egfx::h264::annex_b_nal_types(&stream.data).contains(&5));
+                assert!(crate::egfx::annex_b_nal_types(stream.data).contains(&5));
             }
             assert!(bitmaps.try_recv().is_err());
             drop(proc);

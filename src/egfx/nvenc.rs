@@ -45,7 +45,7 @@ pub struct NvencEncoder {
 impl NvencEncoder {
     pub fn new(device: DeviceId, width: u32, height: u32, bitrate: u32, fps: u32) -> Result<Self> {
         let epoch = NEXT_EPOCH
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
             .map_err(|_| Error::InvalidConfig)?;
         let config = Config {
             device,
@@ -167,7 +167,7 @@ impl Nv12Pixels {
         )?;
         let (y, uv) = self.nv12.split_at_mut(self.y.len());
         y.copy_from_slice(&self.y);
-        for ((pair, u), v) in uv.chunks_exact_mut(2).zip(&self.u).zip(&self.v) {
+        for ((pair, u), v) in uv.as_chunks_mut::<2>().0.iter_mut().zip(&self.u).zip(&self.v) {
             pair.copy_from_slice(&[*u, *v]);
         }
         Ok(&self.nv12)
