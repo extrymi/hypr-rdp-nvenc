@@ -74,6 +74,13 @@ def write_user(path, text, mode=0o600):
         os.chown(parent, 1100, 1100)
 
 
+def check_owners():
+    for owned_path in run("pacman", "-Qlq", "hypr-rdp-nvenc").stdout.splitlines():
+        info = Path(owned_path).lstat()
+        assert info.st_uid == 0 and info.st_gid == 0, owned_path
+        assert info.st_mode & 0o6022 == 0, owned_path
+
+
 assert Path("/.dockerenv").exists()
 assert Path("/proc/1/comm").read_text().strip() == "systemd"
 assert os.geteuid() == 0 and not Path("/dev/nvidia0").exists()
@@ -93,9 +100,7 @@ packages_before = run("pacman", "-Q").stdout
 listeners_before = run("ss", "-H", "-lnt").stdout
 run("pacman", "-U", "--noconfirm", V1)
 run("pacman", "-Qkk", "hypr-rdp-nvenc")
-for owned_path in run("pacman", "-Qlq", "hypr-rdp-nvenc").stdout.splitlines():
-    info = Path(owned_path).lstat()
-    assert info.st_uid == 0 and info.st_gid == 0, owned_path
+check_owners()
 binary_hash = digest(Path("/usr/bin/hypr-rdp"))
 assert not CONFIG.exists()
 assert listeners_before == run("ss", "-H", "-lnt").stdout
@@ -170,7 +175,7 @@ assert prop("ActiveState") == "inactive" and prop("NRestarts") == "0"
 (CONFIG / "key.pem").chmod(0o600)
 record("bad TLS permissions: production preflight skips unit without retries")
 
-ctl("reset-failed", UNIT)  # Start a separate lifecycle scenario with a fresh budget.
+ctl("reset-failed")  # Isolated test manager: reset even if the skipped unit was GC'd.
 ctl("start", "hypr-rdp-ci-desktop.target")
 ctl("start", UNIT)
 wait_for(lambda: (CONFIG / "oracle.json").exists())
@@ -185,7 +190,7 @@ assert prop("ActiveState") == "inactive" and not (HOME / "should-not-exist.keys"
 record("real user manager: environment, private umask, no keylog, target stop/reap")
 
 (CONFIG / "oracle.json").unlink()
-ctl("reset-failed", UNIT)
+ctl("reset-failed")
 write_user(CONFIG / "ignore-stop", "ignore\n")
 unrelated = subprocess.Popen(["sleep", "120"])
 try:
@@ -202,7 +207,7 @@ finally:
     unrelated.wait(timeout=5)
 (CONFIG / "ignore-stop").unlink()
 (CONFIG / "oracle.json").unlink()
-ctl("reset-failed", UNIT)
+ctl("reset-failed")
 record("stop escalation kills only this unit's hung parent/child, preserving an unrelated process")
 
 write_user(CONFIG / "fail-oracle", "fail\n")
@@ -210,7 +215,7 @@ ctl("start", UNIT, ok=False)
 wait_for(lambda: prop("ActiveState") == "failed")
 assert 1 <= int(prop("NRestarts")) <= 3 and prop("Result") == "start-limit-hit"
 (CONFIG / "fail-oracle").unlink()
-ctl("reset-failed", UNIT)
+ctl("reset-failed")
 record("runtime failures hit the bounded systemd start limit")
 
 probe = "/usr/local/libexec/hypr-rdp-ci/pam-probe"
@@ -224,6 +229,7 @@ pam_path.write_text(pam_path.read_text() + "# administrator fixture retained by 
 pam_hash = digest(pam_path)
 for package, version in ((V2, "0.1.7.nvenc1-2"), (V1, "0.1.7.nvenc1-1")):
     run("pacman", "-U", "--noconfirm", package)
+    check_owners()
     assert run("pacman", "-Q", "hypr-rdp-nvenc").stdout.strip().endswith(version)
     assert digest(pam_path) == pam_hash
     assert digest(Path("/usr/bin/hypr-rdp")) == binary_hash
