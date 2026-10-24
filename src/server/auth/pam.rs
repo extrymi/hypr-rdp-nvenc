@@ -190,7 +190,7 @@ impl PamValidator {
         );
         Ok(Self {
             service,
-            executable: std::env::current_exe()?,
+            executable: helper_executable()?,
             slots: Semaphore::new(1),
         })
     }
@@ -252,6 +252,11 @@ impl Drop for PamChild {
         // Also covers cancellation; Tokio's kill_on_drop handles child reaping.
         self.kill_group();
     }
+}
+
+/// Executable used for the private PAM helper process.
+pub(crate) fn helper_executable() -> std::io::Result<PathBuf> {
+    std::env::current_exe()
 }
 
 async fn run_helper(
