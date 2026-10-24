@@ -4,7 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main, codex/cpu-baseline, codex/nvenc-lifecycle, codex/startup-validation, codex/native-nvenc]
+    # Every stacked base, so runtime fixes above the packaging pin get CPU CI.
+    branches: ['**']
 
 permissions:
   contents: read
