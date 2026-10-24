@@ -86,6 +86,13 @@ PID and `/proc/PID/stat` start time. Until Init the worker does no driver work.
 If the parent dies before persistence, socket EOF terminates the uninitialized
 worker. If it dies later, releasing the lock does not erase the worker record.
 
+The lease explicitly unlocks on Drop. Closing only its descriptor is insufficient
+when a concurrent fork briefly inherits a duplicate before exec: Linux flock is
+associated with the shared open file description. A deterministic descriptor-dup
+regression covers that case; CI also repeats the concurrent subprocess suite
+five times. This avoids transient false quarantine without clearing a live-worker
+record or weakening admission. See [flock semantics](https://man7.org/linux/man-pages/man2/flock.2.html).
+
 A subsequent parent refuses a new worker while the recorded process identity
 still exists. An absent process, different start time (PID reuse), or new boot
 permits reconciliation. Read/parse/permission errors fail closed. No process is

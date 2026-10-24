@@ -14,9 +14,21 @@ use super::{DeviceId, Error};
 /// lease does not erase the record: a parent crash must not permit a second
 /// GPU worker. No PID read from disk is ever signalled or killed.
 pub struct DeviceLease {
-    _lock: File,
+    lock: File,
     path: PathBuf,
     device: DeviceId,
+}
+
+impl Drop for DeviceLease {
+    fn drop(&mut self) {
+        // flock is attached to the open file description. A concurrently
+        // forked child can retain a duplicate until exec closes its CLOEXEC
+        // descriptors. Closing only our File would transiently retain the
+        // lock. Explicit unlock releases it across those inherited copies.
+        // The worker identity record deliberately remains for reconciliation.
+        // SAFETY: this lease still owns a valid descriptor during Drop.
+        unsafe { libc::flock(self.lock.as_raw_fd(), libc::LOCK_UN) };
+    }
 }
 
 #[derive(Debug)]
@@ -66,7 +78,7 @@ impl DeviceLease {
             );
         }
         let lease = Self {
-            _lock: lock,
+            lock,
             path: root.join(format!("{device}.worker")),
             device,
         };
@@ -230,6 +242,21 @@ mod tests {
         let next = DeviceLease::acquire(&root, device).unwrap();
         assert!(!next.path.exists());
         drop(next);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn inherited_descriptor_does_not_retain_a_released_parent_lock() {
+        let root = std::env::temp_dir().join(format!("hypr-rdp-inherited-{}", std::process::id()));
+        let device: DeviceId = "GPU-01234567-89ab-cdef-0123-456789abcdef".parse().unwrap();
+        let lease = DeviceLease::acquire(&root, device.clone()).unwrap();
+        // dup shares the open file description, just like a descriptor
+        // inherited by another thread's fork before the child reaches exec.
+        let inherited = lease.lock.try_clone().unwrap();
+        drop(lease);
+        let next = DeviceLease::acquire(&root, device).unwrap();
+        drop(next);
+        drop(inherited);
         std::fs::remove_dir_all(root).unwrap();
     }
 

@@ -69,6 +69,13 @@ jobs:
       - name: Clippy all targets and existing features
         run: cargo clippy --frozen --all-targets --all-features -- -D warnings 2>&1 | tee artifacts/clippy.log
 
+      - name: Test NVENC lifecycle with concurrent process creation
+        run: |
+          cargo test --frozen --lib 2>&1 | tee artifacts/test-nvenc-core.log
+          for attempt in 1 2 3 4 5; do
+            cargo test --frozen --test nvenc_worker -- --test-threads=4 2>&1 | tee "artifacts/test-nvenc-worker-${attempt}.log"
+          done
+
       - name: Test default features
         run: cargo test --frozen 2>&1 | tee artifacts/test-default.log
 
