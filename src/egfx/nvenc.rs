@@ -167,7 +167,13 @@ impl Nv12Pixels {
         )?;
         let (y, uv) = self.nv12.split_at_mut(self.y.len());
         y.copy_from_slice(&self.y);
-        for ((pair, u), v) in uv.as_chunks_mut::<2>().0.iter_mut().zip(&self.u).zip(&self.v) {
+        for ((pair, u), v) in uv
+            .as_chunks_mut::<2>()
+            .0
+            .iter_mut()
+            .zip(&self.u)
+            .zip(&self.v)
+        {
             pair.copy_from_slice(&[*u, *v]);
         }
         Ok(&self.nv12)

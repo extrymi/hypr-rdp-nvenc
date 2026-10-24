@@ -180,7 +180,11 @@ fn nv12_conversion_uses_full_range_bt709_and_interleaves_uv_with_padding() {
         let stride = cfg.width as usize * 4 + 32;
         let mut bytes = vec![0xED; stride * cfg.height as usize];
         for row in bytes.chunks_exact_mut(stride) {
-            for p in row[..cfg.width as usize * 4].as_chunks_mut::<4>().0.iter_mut() {
+            for p in row[..cfg.width as usize * 4]
+                .as_chunks_mut::<4>()
+                .0
+                .iter_mut()
+            {
                 p.copy_from_slice(&pixel);
             }
         }
