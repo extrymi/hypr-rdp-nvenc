@@ -12,6 +12,8 @@ license = "MIT"
 default = ["vaapi", "client-to-server"]
 vaapi = ["dep:libva-sys"]
 client-to-server = ["dep:fuser"]
+# Native library adapter only; production capture/EGFX dispatch is a later stage.
+nvenc = ["dep:libloading", "dep:cc"]
 
 [dependencies]
 # VA-API hardware encoding (Intel/AMD)
@@ -48,6 +50,7 @@ pipewire = "0.9"
 
 # System
 libc = "0.2"
+libloading = { version = "=0.8.9", optional = true }
 pam-client = { version = "0.5.0", default-features = false }
 
 # TLS auto-cert generation
@@ -88,3 +91,4 @@ proptest = "1"
 # pam-sys uses bindgen 0.69 without default features. Match PipeWire's
 # clang-sys runtime loading so this bindgen instance loads libclang too.
 bindgen = { version = "0.69", default-features = false, features = ["runtime"] }
+cc = { version = "=1.4.2", optional = true }

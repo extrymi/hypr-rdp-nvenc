@@ -1,0 +1,17 @@
+{
+  "repository": "FFmpeg/nv-codec-headers",
+  "tag": "n13.1.15.0",
+  "commit": "0a6fba9a2820628b8103464f4c8753ee05838baa",
+  "files": [
+    {
+      "path": "nvEncodeAPI.h",
+      "git_blob": "f059ac07ae25107beb855aa7f38b63872835c80a",
+      "sha256": "8776fddcb8febc6aec4d73989b1f21831eb30306bc583da55b4bf0c14a1dc228"
+    },
+    {
+      "path": "dynlink_cuda.h",
+      "git_blob": "25077cdf38dbbf22d66c49ffe125e479910291e9",
+      "sha256": "c970d5817120ea481ba29b9c603bdc9a386985d9fc98a47f6588030dcdba87c1"
+    }
+  ]
+}

@@ -11,8 +11,8 @@
     "target": "x86_64-unknown-linux-gnu"
   },
   "ironrdp_revision": "3db08ba86983ce35c9d36ad33f59ceb4b607dce8",
-  "cargo_lock_sha256": "ec720d7d884a66f6ba67c3af2909f457f81e5d93dd9cf3bae6b57492e6400490",
-  "cargo_toml_sha256": "c9108c0fda89997246e274fe461661b4c1567f655c1deb70a4fa72b280d9ca7c",
+  "cargo_lock_sha256": "fe819747ced1973efd6699aa19b03967a6b08a59f69028bc3e2afecb6628e876",
+  "cargo_toml_sha256": "97b04f3f1c23b6abee9d37665a8ea564c56707539a76ab82dc84b1e58189b716",
   "locked_packages": 484,
   "runner": "ubuntu-24.04",
   "actions": {
@@ -45,5 +45,5 @@
       ]
     }
   ],
-  "scope": "CPU build and upstream tests; no NVENC implementation, live desktop or hardware qualification"
+  "scope": "CPU development build and tests, including optional native NVENC ABI and mocked API/decode checks; no production NVENC integration, live desktop or hardware qualification"
 }
