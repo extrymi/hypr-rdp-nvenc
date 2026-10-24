@@ -74,12 +74,19 @@ jobs:
           # devices, credentials, Docker socket or workstation filesystem mount.
           docker run -d --name hypr-arch-runtime --privileged --cgroupns=private \
             --tmpfs /run --tmpfs /run/lock \
-            -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
-            -v "$PWD/artifacts:/out:rw" hypr-arch-runtime:ci /sbin/init
-          for attempt in {1..60}; do
-            if docker exec hypr-arch-runtime test -S /run/dbus/system_bus_socket; then break; fi
+            -e container=docker -e SYSTEMD_LOG_TARGET=console -e SYSTEMD_LOG_LEVEL=info \
+            -v "$PWD/artifacts:/out:rw" hypr-arch-runtime:ci /sbin/init --log-target=console
+          ready=false
+          for attempt in {1..30}; do
+            if [[ $(docker inspect --format '{{.State.Running}}' hypr-arch-runtime) != true ]]; then break; fi
+            if docker exec hypr-arch-runtime test -S /run/dbus/system_bus_socket; then ready=true; break; fi
             sleep 1
           done
+          if [[ $ready != true ]]; then
+            docker inspect hypr-arch-runtime
+            docker logs hypr-arch-runtime
+            exit 1
+          fi
           docker exec hypr-arch-runtime python3 /root/hypr-rdp-lifecycle.py 2>&1 | tee artifacts/arch-lifecycle.log
 
       - name: Preserve evidence and clean up containers
