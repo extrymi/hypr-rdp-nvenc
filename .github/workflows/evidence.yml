@@ -1,0 +1,62 @@
+name: Regression evidence
+
+# Runs exact Rust tests on exact runtime revisions named in ci/evidence/spec.json.
+# This branch is never merged; it only carries the harness and the spec.
+on:
+  push:
+    branches: [impl/r1-evidence]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: regression-evidence-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+  RUSTUP_TOOLCHAIN: "1.99.1"
+  RUST_TEST_THREADS: "2"
+  PROPTEST_CASES: "512"
+
+jobs:
+  evidence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout harness and runtime history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Keep the harness outside the revisions under test
+        run: |
+          mkdir -p "$RUNNER_TEMP/harness" artifacts
+          cp ci/evidence/run.py ci/evidence/spec.json "$RUNNER_TEMP/harness/"
+          git rev-parse HEAD > artifacts/harness-revision.txt
+          sha256sum ci/evidence/run.py ci/evidence/spec.json | tee artifacts/harness-sha256.txt
+
+      - name: Install dependencies on disposable runner
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential clang cmake pkg-config libclang-dev libpipewire-0.3-dev libva-dev libxkbcommon-dev libwayland-dev libgbm-dev libpam0g-dev fuse3
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal --target x86_64-unknown-linux-gnu
+
+      - name: Run exact tests on exact revisions
+        run: python3 "$RUNNER_TEMP/harness/run.py" "$RUNNER_TEMP/harness/spec.json" artifacts
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: regression-evidence-${{ github.sha }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30

@@ -1,0 +1,30 @@
+{
+  "cases": [
+    {
+      "id": "b1-before",
+      "revision": "f1b54ca2b1dd7360784f17f6768646f046e66ba3",
+      "cargo": ["--features", "nvenc", "--bin", "hypr-rdp"],
+      "tests": {
+        "egfx::tests::avc420_ack_inside_publication_window_releases_local_window":
+          {"result": "FAILED", "messages": ["ACK for frame 0 was lost", "left: 1"]},
+        "egfx::tests::avc444_ack_inside_publication_window_releases_local_window":
+          {"result": "FAILED", "messages": ["AVC444 ACK inside the publication window was lost", "left: 1"]},
+        "egfx::tests::rejected_publication_leaves_no_local_charge": {"result": "ok"}
+      }
+    },
+    {
+      "id": "b1-after",
+      "revision": "7af3bdb58dbcebcea28b74e509cca3434906a3b6",
+      "cargo": ["--features", "nvenc", "--bin", "hypr-rdp"],
+      "tests": {
+        "egfx::tests::avc420_ack_inside_publication_window_releases_local_window": {"result": "ok"},
+        "egfx::tests::avc444_ack_inside_publication_window_releases_local_window": {"result": "ok"},
+        "egfx::tests::rejected_publication_leaves_no_local_charge": {"result": "ok"},
+        "egfx::tests::tracked_frame_ack_releases_local_queue_depth": {"result": "ok"},
+        "egfx::tests::tracked_queue_policy_honors_client_ack_suspend": {"result": "ok"},
+        "egfx::tests::reset_for_new_client_clears_negotiated_state_and_frame_queue": {"result": "ok"}
+      },
+      "suites": [{"filter": "egfx::", "min_passed": 140}]
+    }
+  ]
+}
