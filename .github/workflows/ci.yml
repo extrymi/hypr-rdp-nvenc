@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    branches: [main, codex/cpu-baseline]
 
 permissions:
   contents: read
@@ -55,7 +55,16 @@ jobs:
           cargo metadata --frozen --format-version 1 > artifacts/cargo-metadata.json
 
       - name: Check formatting
-        run: cargo fmt --all -- --check 2>&1 | tee artifacts/fmt.log
+        run: |
+          if ! cargo fmt --all -- --check > artifacts/fmt.log 2>&1; then
+            cat artifacts/fmt.log
+            cargo fmt --all
+            git diff --no-color > artifacts/rustfmt.patch
+            echo HYPR_RUSTFMT_PATCH_BEGIN
+            cat artifacts/rustfmt.patch
+            echo HYPR_RUSTFMT_PATCH_END
+            exit 1
+          fi
 
       - name: Clippy all targets and existing features
         run: cargo clippy --frozen --all-targets --all-features -- -D warnings 2>&1 | tee artifacts/clippy.log
