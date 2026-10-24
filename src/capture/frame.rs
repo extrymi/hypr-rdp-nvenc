@@ -669,7 +669,9 @@ impl FrameProcessor {
             .as_ref()
             .is_some_and(|shared| shared.is_ready() && !shared.is_avc_enabled())
         {
-            if !self.h264_backend.allows_software() { return false; }
+            if !self.h264_backend.allows_software() {
+                return false;
+            }
             return self.process_clearcodec(data);
         }
 
@@ -742,7 +744,11 @@ impl FrameProcessor {
                         }
                         Err(e) => {
                             tracing::error!("Failed to initialize H.264 encoder: {:#}", e);
-                            if !self.h264_backend.allows_software() || self.h264_backend.nvenc_device().is_some() { return false; }
+                            if !self.h264_backend.allows_software()
+                                || self.h264_backend.nvenc_device().is_some()
+                            {
+                                return false;
+                            }
                         }
                     }
                 }
@@ -931,7 +937,11 @@ impl FrameProcessor {
                             );
                         }
                         Some(Ok(_)) => {
-                            if !self.h264_backend.allows_software() || self.h264_encoder.as_ref().is_some_and(|e| e.is_nvenc()) { return false; }
+                            if !self.h264_backend.allows_software()
+                                || self.h264_encoder.as_ref().is_some_and(|e| e.is_nvenc())
+                            {
+                                return false;
+                            }
                             self.encode_failures += 1;
                             tracing::trace!(
                                 failures = self.encode_failures,
@@ -943,21 +953,36 @@ impl FrameProcessor {
                             }
                         }
                         Some(Err(e)) => {
-                            if self.h264_encoder.as_ref().is_some_and(|encoder| encoder.is_nvenc()) {
+                            if self
+                                .h264_encoder
+                                .as_ref()
+                                .is_some_and(|encoder| encoder.is_nvenc())
+                            {
                                 let fallback = self.h264_backend.allows_runtime_software_fallback()
-                                    && self.h264_encoder.as_ref().is_some_and(|encoder| encoder.native_software_fallback_allowed(&e));
+                                    && self.h264_encoder.as_ref().is_some_and(|encoder| {
+                                        encoder.native_software_fallback_allowed(&e)
+                                    });
                                 if !fallback {
                                     tracing::error!(%e, "NVENC failed; ending capture session");
                                     return false;
                                 }
                                 tracing::warn!(%e, "NVENC worker exited; recovering with software VBR and a full IDR");
-                                let replacement = crate::egfx::FrameEncoder::new_software_only_for_egfx_codec(
-                                    EgfxCodec::Avc420, self.width, self.height, self.bitrate, self.fps, self.quality,
-                                    self.h264_backend.software_rate(self.rate_control),
-                                );
+                                let replacement =
+                                    crate::egfx::FrameEncoder::new_software_only_for_egfx_codec(
+                                        EgfxCodec::Avc420,
+                                        self.width,
+                                        self.height,
+                                        self.bitrate,
+                                        self.fps,
+                                        self.quality,
+                                        self.h264_backend.software_rate(self.rate_control),
+                                    );
                                 match replacement {
                                     Ok(encoder) => self.h264_encoder = Some(encoder),
-                                    Err(error) => { tracing::error!(%error, "Software recovery failed"); return false; }
+                                    Err(error) => {
+                                        tracing::error!(%error, "Software recovery failed");
+                                        return false;
+                                    }
                                 }
                                 self.egfx_surface_id = None;
                                 self.sent_first_frame = false;
@@ -1061,7 +1086,9 @@ impl FrameProcessor {
         };
 
         if !sent_via_egfx && should_send_bitmap {
-            if !self.h264_backend.allows_software() { return false; }
+            if !self.h264_backend.allows_software() {
+                return false;
+            }
             self.sent_first_frame = true;
             let update = DisplayUpdate::Bitmap(BitmapUpdate {
                 x: 0,
@@ -1095,10 +1122,30 @@ mod tests {
         for automatic in [false, true] {
             let (encoder, root) = crate::egfx::nvenc_test_encoder(true);
             let device = "GPU-01234567-89ab-cdef-0123-456789abcdef".parse().unwrap();
-            let policy = if automatic { H264BackendPolicy::AutoNvenc(device) } else { H264BackendPolicy::Nvenc(device) };
-            let (shared, mut bridge, _handle, _sender, mut events) = crate::egfx::test_support::negotiated_avc420_session(64, 64, DEFAULT_MAX_FRAMES_IN_FLIGHT);
+            let policy = if automatic {
+                H264BackendPolicy::AutoNvenc(device)
+            } else {
+                H264BackendPolicy::Nvenc(device)
+            };
+            let (shared, mut bridge, _handle, _sender, mut events) =
+                crate::egfx::test_support::negotiated_avc420_session(
+                    64,
+                    64,
+                    DEFAULT_MAX_FRAMES_IN_FLIGHT,
+                );
             let (tx, mut bitmaps) = mpsc::channel(4);
-            let mut proc = FrameProcessor::new_with_h264_backend(Some(Arc::clone(&shared)), 64, 64, PixelFormat::RgbX32, 256, 1_000_000, 23, H264RateControl::Cbr, 30, policy);
+            let mut proc = FrameProcessor::new_with_h264_backend(
+                Some(Arc::clone(&shared)),
+                64,
+                64,
+                PixelFormat::RgbX32,
+                256,
+                1_000_000,
+                23,
+                H264RateControl::Cbr,
+                30,
+                policy,
+            );
             proc.egfx_ready = true;
             proc.egfx_generation = shared.generation();
             proc.egfx_codec = Some(EgfxCodec::Avc420);
@@ -1107,19 +1154,39 @@ mod tests {
             let red = [255, 0, 0, 255].repeat(64 * 64);
             assert!(proc.process(&red, &tx));
             let trace = drain_gfx_pdus(&mut events);
-            assert!(trace.as_slice().iter().any(|p| matches!(p, GfxPdu::WireToSurface1(_))));
-            ack_frame(&mut bridge, shared.frame_flow_snapshot().last_queued_frame_id, TestQueueDepth::AvailableBytes(0));
+            assert!(trace
+                .as_slice()
+                .iter()
+                .any(|p| matches!(p, GfxPdu::WireToSurface1(_))));
+            ack_frame(
+                &mut bridge,
+                shared.frame_flow_snapshot().last_queued_frame_id,
+                TestQueueDepth::AvailableBytes(0),
+            );
             proc.queue_damage(&[(0, 0, 64, 64)]);
             let green = [0, 255, 0, 255].repeat(64 * 64);
             assert_eq!(proc.process(&green, &tx), automatic);
             if automatic {
-                assert_eq!(proc.h264_encoder.as_ref().unwrap().backend_name(), "openh264");
+                assert_eq!(
+                    proc.h264_encoder.as_ref().unwrap().backend_name(),
+                    "openh264"
+                );
                 assert!(shared.full_frame_requested());
                 assert!(proc.process(&green, &tx));
                 let trace = drain_gfx_pdus(&mut events);
-                let wire = trace.as_slice().iter().find_map(|p| match p { GfxPdu::WireToSurface1(wire) => Some(wire), _ => None }).expect("software recovery frame");
+                let wire = trace
+                    .as_slice()
+                    .iter()
+                    .find_map(|p| match p {
+                        GfxPdu::WireToSurface1(wire) => Some(wire),
+                        _ => None,
+                    })
+                    .expect("software recovery frame");
                 use ironrdp_core::Decode;
-                let stream = ironrdp_egfx::pdu::Avc420BitmapStream::decode(&mut ironrdp_core::ReadCursor::new(&wire.bitmap_data)).unwrap();
+                let stream = ironrdp_egfx::pdu::Avc420BitmapStream::decode(
+                    &mut ironrdp_core::ReadCursor::new(&wire.bitmap_data),
+                )
+                .unwrap();
                 let mut decoder = openh264::decoder::Decoder::new().unwrap();
                 use openh264::formats::YUVSource;
                 let frame = decoder.decode(&stream.data).unwrap().unwrap();
@@ -2317,7 +2384,10 @@ mod tests {
         setup_pdus.assert_no_encoded_frame();
 
         assert!(!processor.process(&frame, &display_tx));
-        assert!(processor.h264_encoder.as_ref().is_some_and(|e| e.backend_name() == "vaapi-test-failing"));
+        assert!(processor
+            .h264_encoder
+            .as_ref()
+            .is_some_and(|e| e.backend_name() == "vaapi-test-failing"));
         assert!(display_rx.try_recv().is_err());
         drain_gfx_pdus(&mut event_rx).assert_no_encoded_frame();
     }

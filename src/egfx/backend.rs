@@ -36,11 +36,18 @@ pub enum H264BackendPolicy {
 
 impl H264BackendPolicy {
     pub(crate) fn nvenc_device(self) -> Option<hypr_rdp::nvenc::DeviceId> {
-        match self { Self::Nvenc(device) | Self::AutoNvenc(device) => Some(device), _ => None }
+        match self {
+            Self::Nvenc(device) | Self::AutoNvenc(device) => Some(device),
+            _ => None,
+        }
     }
 
     pub(crate) fn software_rate(self, rate: H264RateControl) -> H264RateControl {
-        if self.nvenc_device().is_some() { H264RateControl::Vbr } else { rate }
+        if self.nvenc_device().is_some() {
+            H264RateControl::Vbr
+        } else {
+            rate
+        }
     }
 
     pub(crate) fn allows_vaapi(self) -> bool {
@@ -73,14 +80,18 @@ pub enum FrameEncoder {
 impl FrameEncoder {
     pub(crate) fn native_software_fallback_allowed(&self, error: &anyhow::Error) -> bool {
         #[cfg(feature = "nvenc")]
-        if matches!(self, Self::Nvenc(_)) { return super::nvenc::can_fallback(error); }
+        if matches!(self, Self::Nvenc(_)) {
+            return super::nvenc::can_fallback(error);
+        }
         let _ = error;
         false
     }
 
     pub(crate) fn is_nvenc(&self) -> bool {
         #[cfg(feature = "nvenc")]
-        if matches!(self, Self::Nvenc(_)) { return true; }
+        if matches!(self, Self::Nvenc(_)) {
+            return true;
+        }
         false
     }
 
@@ -100,16 +111,32 @@ impl FrameEncoder {
             #[cfg(feature = "nvenc")]
             match super::nvenc::NvencEncoder::new(device, width, height, bitrate, fps) {
                 Ok(encoder) => return Ok(Self::Nvenc(Box::new(encoder))),
-                Err(error) if policy.allows_runtime_software_fallback() && super::nvenc::can_fallback(&error) => {
+                Err(error)
+                    if policy.allows_runtime_software_fallback()
+                        && super::nvenc::can_fallback(&error) =>
+                {
                     tracing::warn!(%error, "NVENC startup failed after confirmed exit; using software VBR");
-                    return Self::new_software_only(width, height, bitrate, fps, quality, H264RateControl::Vbr);
+                    return Self::new_software_only(
+                        width,
+                        height,
+                        bitrate,
+                        fps,
+                        quality,
+                        H264RateControl::Vbr,
+                    );
                 }
                 Err(error) => return Err(error.context("NVENC initialization failed")),
             }
             #[cfg(not(feature = "nvenc"))]
-            { let _ = device; anyhow::bail!("h264_backend=nvenc requested but built without the nvenc feature"); }
+            {
+                let _ = device;
+                anyhow::bail!("h264_backend=nvenc requested but built without the nvenc feature");
+            }
         }
-        anyhow::ensure!(rate_control != H264RateControl::Cbr, "CBR is currently supported only by NVENC");
+        anyhow::ensure!(
+            rate_control != H264RateControl::Cbr,
+            "CBR is currently supported only by NVENC"
+        );
         #[cfg(feature = "vaapi")]
         if policy.allows_vaapi() {
             match vaapi::VaapiEncoder::new(width, height, bitrate, fps, quality, rate_control) {
@@ -331,7 +358,10 @@ impl FrameEncoder {
         quality: u8,
         rate_control: H264RateControl,
     ) -> Result<Self> {
-        anyhow::ensure!(policy.nvenc_device().is_none(), "NVENC supports only AVC420");
+        anyhow::ensure!(
+            policy.nvenc_device().is_none(),
+            "NVENC supports only AVC420"
+        );
         if !policy.allows_software() {
             anyhow::bail!("h264_backend=vaapi requested for AVC444, but the native VA-API backend only supports AVC420");
         }
@@ -398,7 +428,9 @@ impl FrameEncoder {
 
     pub fn force_full_frame(&mut self) {
         #[cfg(feature = "nvenc")]
-        if let Self::Nvenc(encoder) = self { encoder.force_idr(); }
+        if let Self::Nvenc(encoder) = self {
+            encoder.force_idr();
+        }
         if let Self::SoftwareAvc444(enc) = self {
             enc.force_full_frame();
         }

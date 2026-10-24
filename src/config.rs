@@ -480,11 +480,23 @@ impl RuntimeConfig {
         let bitrate = args.bitrate.or(config.bitrate).unwrap_or(10_000_000);
         let quality_explicit = args.quality.is_some() || config.quality.is_some();
         let quality = args.quality.or(config.quality).unwrap_or(23);
-        let h264_backend = resolve_encoder_backend(args.h264_backend, config.h264_backend, args.nvenc_device, config.nvenc_device)?;
+        let h264_backend = resolve_encoder_backend(
+            args.h264_backend,
+            config.h264_backend,
+            args.nvenc_device,
+            config.nvenc_device,
+        )?;
         let rate_control_str = args
             .rate_control
             .or(config.rate_control)
-            .unwrap_or_else(|| if h264_backend.nvenc_device().is_some() { "cbr" } else { "vbr" }.into());
+            .unwrap_or_else(|| {
+                if h264_backend.nvenc_device().is_some() {
+                    "cbr"
+                } else {
+                    "vbr"
+                }
+                .into()
+            });
         let rate_control = parse_rate_control(&rate_control_str)?;
         let fps = args.fps.or(config.fps).unwrap_or(30);
         let max_frames_in_flight = args
@@ -511,7 +523,15 @@ impl RuntimeConfig {
 
         let resolution = parse_resolution(&resolution_str)?;
         let capture_mode = parse_capture_mode(&capture_mode_str)?;
-        validate_encoder_request(h264_backend, rate_control, quality_explicit, egfx_codec, resolution, bitrate, fps)?;
+        validate_encoder_request(
+            h264_backend,
+            rate_control,
+            quality_explicit,
+            egfx_codec,
+            resolution,
+            bitrate,
+            fps,
+        )?;
 
         if quality > 51 {
             anyhow::bail!("quality must be 0-51");
@@ -654,27 +674,67 @@ fn resolve_h264_backend_policy(
     }
 }
 
-fn resolve_encoder_backend(cli_backend: Option<String>, config_backend: Option<String>, cli_device: Option<String>, config_device: Option<String>) -> anyhow::Result<H264BackendPolicy> {
-    let backend = cli_backend.or(config_backend).unwrap_or_else(|| "auto".into());
+fn resolve_encoder_backend(
+    cli_backend: Option<String>,
+    config_backend: Option<String>,
+    cli_device: Option<String>,
+    config_device: Option<String>,
+) -> anyhow::Result<H264BackendPolicy> {
+    let backend = cli_backend
+        .or(config_backend)
+        .unwrap_or_else(|| "auto".into());
     let device = cli_device.or(config_device);
     match (backend.as_str(), device) {
         ("nvenc", Some(device)) => Ok(H264BackendPolicy::Nvenc(device.parse()?)),
         ("auto", Some(device)) => Ok(H264BackendPolicy::AutoNvenc(device.parse()?)),
-        ("nvenc", None) => anyhow::bail!("nvenc requires nvenc_device / --nvenc-device with a stable GPU UUID"),
+        ("nvenc", None) => {
+            anyhow::bail!("nvenc requires nvenc_device / --nvenc-device with a stable GPU UUID")
+        }
         (_, Some(_)) => anyhow::bail!("nvenc_device requires h264_backend=nvenc or auto"),
         _ => resolve_h264_backend_policy(Some(backend), None),
     }
 }
 
-fn validate_encoder_request(policy: H264BackendPolicy, rate: H264RateControl, quality_explicit: bool, codec: EgfxCodecPolicy, resolution: (u32, u32), bitrate: u32, fps: u32) -> anyhow::Result<()> {
+fn validate_encoder_request(
+    policy: H264BackendPolicy,
+    rate: H264RateControl,
+    quality_explicit: bool,
+    codec: EgfxCodecPolicy,
+    resolution: (u32, u32),
+    bitrate: u32,
+    fps: u32,
+) -> anyhow::Result<()> {
     if let Some(device) = policy.nvenc_device() {
-        anyhow::ensure!(cfg!(feature = "nvenc"), "NVENC requested but built without the nvenc feature");
-        anyhow::ensure!(rate == H264RateControl::Cbr, "NVENC currently supports only rate_control=cbr");
-        anyhow::ensure!(!quality_explicit, "NVENC CBR does not implement the quality option; remove it");
-        anyhow::ensure!(codec == EgfxCodecPolicy::Avc420, "NVENC requires egfx_codec=avc420");
-        hypr_rdp::nvenc::Config { device, epoch: 1, width: resolution.0, height: resolution.1, fps, bitrate }.frame_bytes()?;
+        anyhow::ensure!(
+            cfg!(feature = "nvenc"),
+            "NVENC requested but built without the nvenc feature"
+        );
+        anyhow::ensure!(
+            rate == H264RateControl::Cbr,
+            "NVENC currently supports only rate_control=cbr"
+        );
+        anyhow::ensure!(
+            !quality_explicit,
+            "NVENC CBR does not implement the quality option; remove it"
+        );
+        anyhow::ensure!(
+            codec == EgfxCodecPolicy::Avc420,
+            "NVENC requires egfx_codec=avc420"
+        );
+        hypr_rdp::nvenc::Config {
+            device,
+            epoch: 1,
+            width: resolution.0,
+            height: resolution.1,
+            fps,
+            bitrate,
+        }
+        .frame_bytes()?;
     } else {
-        anyhow::ensure!(rate != H264RateControl::Cbr, "CBR is currently supported only by NVENC");
+        anyhow::ensure!(
+            rate != H264RateControl::Cbr,
+            "CBR is currently supported only by NVENC"
+        );
     }
     Ok(())
 }
@@ -684,7 +744,10 @@ fn parse_rate_control(s: &str) -> anyhow::Result<H264RateControl> {
         "vbr" => Ok(H264RateControl::Vbr),
         "cqp" => Ok(H264RateControl::Cqp),
         "cbr" => Ok(H264RateControl::Cbr),
-        other => anyhow::bail!("unknown rate control '{}', expected 'vbr', 'cqp', or 'cbr'", other),
+        other => anyhow::bail!(
+            "unknown rate control '{}', expected 'vbr', 'cqp', or 'cbr'",
+            other
+        ),
     }
 }
 
@@ -1623,9 +1686,20 @@ mod nvenc_configuration_tests {
     #[test]
     fn stable_gpu_selection_is_explicit_and_never_routes_nvidia_to_vaapi() {
         assert!(resolve_encoder_backend(Some("nvenc".into()), None, None, None).is_err());
-        assert!(resolve_encoder_backend(Some("nvenc".into()), None, Some("0".into()), None).is_err());
-        assert!(resolve_encoder_backend(Some("software".into()), None, Some(UUID.into()), None).is_err());
-        let strict = resolve_encoder_backend(Some("nvenc".into()), None, Some(UUID.into()), Some("invalid".into())).unwrap();
+        assert!(
+            resolve_encoder_backend(Some("nvenc".into()), None, Some("0".into()), None).is_err()
+        );
+        assert!(
+            resolve_encoder_backend(Some("software".into()), None, Some(UUID.into()), None)
+                .is_err()
+        );
+        let strict = resolve_encoder_backend(
+            Some("nvenc".into()),
+            None,
+            Some(UUID.into()),
+            Some("invalid".into()),
+        )
+        .unwrap();
         assert_eq!(strict, H264BackendPolicy::Nvenc(UUID.parse().unwrap()));
         assert!(!strict.allows_vaapi());
         assert!(!strict.allows_software());
@@ -1637,18 +1711,68 @@ mod nvenc_configuration_tests {
     #[test]
     fn unsupported_native_options_and_missing_build_feature_fail_offline() {
         let policy = H264BackendPolicy::Nvenc(UUID.parse().unwrap());
-        let valid = validate_encoder_request(policy, H264RateControl::Cbr, false, EgfxCodecPolicy::Avc420, (64, 64), 1_000_000, 30);
+        let valid = validate_encoder_request(
+            policy,
+            H264RateControl::Cbr,
+            false,
+            EgfxCodecPolicy::Avc420,
+            (64, 64),
+            1_000_000,
+            30,
+        );
         assert_eq!(valid.is_ok(), cfg!(feature = "nvenc"));
         for (rate, quality, codec, fps, bitrate) in [
-            (H264RateControl::Vbr, false, EgfxCodecPolicy::Avc420, 30, 1_000_000),
-            (H264RateControl::Cqp, false, EgfxCodecPolicy::Avc420, 30, 1_000_000),
-            (H264RateControl::Cbr, true, EgfxCodecPolicy::Avc420, 30, 1_000_000),
-            (H264RateControl::Cbr, false, EgfxCodecPolicy::Avc444, 30, 1_000_000),
-            (H264RateControl::Cbr, false, EgfxCodecPolicy::Avc420, 241, 1_000_000),
+            (
+                H264RateControl::Vbr,
+                false,
+                EgfxCodecPolicy::Avc420,
+                30,
+                1_000_000,
+            ),
+            (
+                H264RateControl::Cqp,
+                false,
+                EgfxCodecPolicy::Avc420,
+                30,
+                1_000_000,
+            ),
+            (
+                H264RateControl::Cbr,
+                true,
+                EgfxCodecPolicy::Avc420,
+                30,
+                1_000_000,
+            ),
+            (
+                H264RateControl::Cbr,
+                false,
+                EgfxCodecPolicy::Avc444,
+                30,
+                1_000_000,
+            ),
+            (
+                H264RateControl::Cbr,
+                false,
+                EgfxCodecPolicy::Avc420,
+                241,
+                1_000_000,
+            ),
             (H264RateControl::Cbr, false, EgfxCodecPolicy::Avc420, 30, 0),
         ] {
-            assert!(validate_encoder_request(policy, rate, quality, codec, (64, 64), bitrate, fps).is_err());
+            assert!(
+                validate_encoder_request(policy, rate, quality, codec, (64, 64), bitrate, fps)
+                    .is_err()
+            );
         }
-        assert!(validate_encoder_request(H264BackendPolicy::Software, H264RateControl::Cbr, false, EgfxCodecPolicy::Avc420, (64, 64), 1_000_000, 30).is_err());
+        assert!(validate_encoder_request(
+            H264BackendPolicy::Software,
+            H264RateControl::Cbr,
+            false,
+            EgfxCodecPolicy::Avc420,
+            (64, 64),
+            1_000_000,
+            30
+        )
+        .is_err());
     }
 }

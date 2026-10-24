@@ -479,7 +479,10 @@ impl VaapiEncoder {
         rate_control: H264RateControl,
         reference_mode: VaapiReferenceMode,
     ) -> Result<Self> {
-        anyhow::ensure!(rate_control != H264RateControl::Cbr, "CBR is currently supported only by NVENC");
+        anyhow::ensure!(
+            rate_control != H264RateControl::Cbr,
+            "CBR is currently supported only by NVENC"
+        );
         if width == 0 || height == 0 || !width.is_multiple_of(2) || !height.is_multiple_of(2) {
             bail!("dimensions must be non-zero and even: {}x{}", width, height);
         }

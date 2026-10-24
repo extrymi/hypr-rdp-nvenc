@@ -20,7 +20,10 @@ fn main() -> Result<()> {
     if let Some(status) = server::auth::dispatch_helper() {
         std::process::exit(status);
     }
-    tokio::runtime::Builder::new_multi_thread().enable_all().build()?.block_on(run())
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(run())
 }
 
 async fn run() -> Result<()> {

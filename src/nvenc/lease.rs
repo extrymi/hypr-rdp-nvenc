@@ -232,10 +232,7 @@ mod tests {
             .unwrap();
         lease.bind(child.id()).unwrap();
         drop(lease);
-        let blocked = matches!(
-            DeviceLease::acquire(&root, device),
-            Err(Error::Quarantined)
-        );
+        let blocked = matches!(DeviceLease::acquire(&root, device), Err(Error::Quarantined));
         child.kill().unwrap();
         child.wait().unwrap();
         assert!(blocked);

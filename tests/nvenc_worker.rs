@@ -13,7 +13,8 @@ use std::{
 };
 
 use hypr_rdp::nvenc::{
-    serve, BlockingWorker, Config, Deadlines, DeviceLease, Error, Fault, Frame, Phase, Stamp, Worker, WORKER_FD,
+    serve, BlockingWorker, Config, Deadlines, DeviceLease, Error, Fault, Frame, Phase, Stamp,
+    Worker, WORKER_FD,
 };
 use support::{config, stall, FakeDriver, Scenario};
 
@@ -63,12 +64,19 @@ fn blocking_capture_facade_preserves_identity_and_releases_before_recreate() {
     let mut worker = blocking_start("fixture_normal", &dir, config()).unwrap();
     for sequence in 0..3 {
         let frame = worker.encode(&input, sequence == 2).unwrap();
-        assert_eq!(frame.stamp, Stamp { epoch: 17, sequence });
+        assert_eq!(
+            frame.stamp,
+            Stamp {
+                epoch: 17,
+                sequence
+            }
+        );
         assert_eq!(frame.unit.is_idr, sequence == 0 || sequence == 2);
     }
     worker.shutdown().unwrap();
     assert!(worker.was_reaped());
-    let mut next = config(); next.epoch += 1;
+    let mut next = config();
+    next.epoch += 1;
     let mut worker = blocking_start("fixture_normal", &dir, next).unwrap();
     assert_eq!(worker.encode(&input, false).unwrap().stamp.epoch, 18);
     worker.shutdown().unwrap();
@@ -79,7 +87,10 @@ fn blocking_capture_timeout_is_terminal_and_reaps_before_reuse() {
     let dir = RuntimeDir::new();
     let input = vec![42; config().frame_bytes().unwrap()];
     let mut worker = blocking_start("fixture_encode", &dir, config()).unwrap();
-    assert_eq!(worker.encode(&input, false), Err(Error::Timeout(Phase::Encode)));
+    assert_eq!(
+        worker.encode(&input, false),
+        Err(Error::Timeout(Phase::Encode))
+    );
     assert!(worker.was_reaped());
     assert_eq!(worker.encode(&input, false), Err(Error::Closed));
     drop(worker);
@@ -90,7 +101,10 @@ fn blocking_capture_timeout_is_terminal_and_reaps_before_reuse() {
 #[tokio::test]
 async fn blocking_facade_rejects_executor_context_before_creating_state() {
     let dir = RuntimeDir::new();
-    assert!(matches!(blocking_start("fixture_normal", &dir, config()), Err(Error::InvalidConfig)));
+    assert!(matches!(
+        blocking_start("fixture_normal", &dir, config()),
+        Err(Error::InvalidConfig)
+    ));
     assert!(!dir.0.exists());
 }
 

@@ -113,7 +113,10 @@ impl H264Encoder {
         rate_control: H264RateControl,
         options: H264EncoderOptions,
     ) -> Result<Self> {
-        anyhow::ensure!(rate_control != H264RateControl::Cbr, "CBR is currently supported only by NVENC; software fallback uses VBR");
+        anyhow::ensure!(
+            rate_control != H264RateControl::Cbr,
+            "CBR is currently supported only by NVENC; software fallback uses VBR"
+        );
         if width == 0 || height == 0 || !width.is_multiple_of(2) || !height.is_multiple_of(2) {
             bail!("dimensions must be non-zero and even: {}x{}", width, height);
         }
@@ -307,11 +310,18 @@ pub(super) fn convert_bgra_to_yuv420_planes(
 
 /// Normalize packed 32-bit capture formats before any encoder interprets BGRA.
 /// Padding remains padding, alpha is ignored by the SDR conversion.
-pub(super) fn canonical_bgra(data: &[u8], dimensions: (u32, u32), stride: usize, format: ironrdp_server::PixelFormat) -> Result<std::borrow::Cow<'_, [u8]>> {
+pub(super) fn canonical_bgra(
+    data: &[u8],
+    dimensions: (u32, u32),
+    stride: usize,
+    format: ironrdp_server::PixelFormat,
+) -> Result<std::borrow::Cow<'_, [u8]>> {
     use ironrdp_server::PixelFormat::*;
     let (width, height) = (dimensions.0 as usize, dimensions.1 as usize);
     validate_bgra_buffer(width, height, stride, data.len())?;
-    if matches!(format, BgrA32 | BgrX32) { return Ok(std::borrow::Cow::Borrowed(data)); }
+    if matches!(format, BgrA32 | BgrX32) {
+        return Ok(std::borrow::Cow::Borrowed(data));
+    }
     let (r, g, b) = match format {
         RgbA32 | RgbX32 => (0, 1, 2),
         ARgb32 | XRgb32 => (1, 2, 3),
@@ -328,7 +338,12 @@ pub(super) fn canonical_bgra(data: &[u8], dimensions: (u32, u32), stride: usize,
     Ok(std::borrow::Cow::Owned(bgra))
 }
 
-pub(super) fn validate_bgra_buffer(width: usize, height: usize, stride: usize, len: usize) -> Result<()> {
+pub(super) fn validate_bgra_buffer(
+    width: usize,
+    height: usize,
+    stride: usize,
+    len: usize,
+) -> Result<()> {
     let minimum_stride = width
         .checked_mul(4)
         .context("BGRA stride calculation overflow")?;
@@ -1138,13 +1153,18 @@ mod packed_capture_tests {
     fn packed_capture_formats_preserve_rgb_order_and_ignore_row_padding() {
         use ironrdp_server::PixelFormat::*;
         for (format, pixel) in [
-            (BgrA32, [3, 2, 1, 9]), (BgrX32, [3, 2, 1, 9]),
-            (RgbA32, [1, 2, 3, 9]), (RgbX32, [1, 2, 3, 9]),
-            (ARgb32, [9, 1, 2, 3]), (XRgb32, [9, 1, 2, 3]),
-            (ABgr32, [9, 3, 2, 1]), (XBgr32, [9, 3, 2, 1]),
+            (BgrA32, [3, 2, 1, 9]),
+            (BgrX32, [3, 2, 1, 9]),
+            (RgbA32, [1, 2, 3, 9]),
+            (RgbX32, [1, 2, 3, 9]),
+            (ARgb32, [9, 1, 2, 3]),
+            (XRgb32, [9, 1, 2, 3]),
+            (ABgr32, [9, 3, 2, 1]),
+            (XBgr32, [9, 3, 2, 1]),
         ] {
             let mut bytes = vec![0xED; 24];
-            bytes[0..4].copy_from_slice(&pixel); bytes[12..16].copy_from_slice(&pixel);
+            bytes[0..4].copy_from_slice(&pixel);
+            bytes[12..16].copy_from_slice(&pixel);
             let bgra = canonical_bgra(&bytes, (1, 2), 12, format).unwrap();
             assert_eq!(&bgra[..3], &[3, 2, 1]);
             assert_eq!(&bgra[12..15], &[3, 2, 1]);
