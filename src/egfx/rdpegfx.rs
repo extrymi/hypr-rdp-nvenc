@@ -532,11 +532,15 @@ impl EgfxShared {
         };
 
         let frame_id = queued.frame_id;
+        // Count before the transport can see the frame. FrameAcknowledge runs
+        // under the GraphicsPipelineServer lock, which queue_rdpegfx_frame has
+        // already released, so counting after the send could lose that ACK.
+        self.record_frame_queued(frame_id);
         if Self::send_rdpegfx_dvc_messages(sender, queued, lease, "AVC420", "avc420_rdpegfx_frame")
         {
-            self.record_frame_queued(frame_id);
             true
         } else {
+            self.unrecord_unsent_frame();
             false
         }
     }
@@ -585,11 +589,15 @@ impl EgfxShared {
         };
 
         let frame_id = queued.frame_id;
+        // Count before the transport can see the frame. FrameAcknowledge runs
+        // under the GraphicsPipelineServer lock, which queue_rdpegfx_frame has
+        // already released, so counting after the send could lose that ACK.
+        self.record_frame_queued(frame_id);
         if Self::send_rdpegfx_dvc_messages(sender, queued, lease, "AVC444", "avc444_rdpegfx_frame")
         {
-            self.record_frame_queued(frame_id);
             true
         } else {
+            self.unrecord_unsent_frame();
             false
         }
     }

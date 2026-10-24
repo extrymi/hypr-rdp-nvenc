@@ -322,6 +322,18 @@ impl EgfxShared {
         );
     }
 
+    /// Undo `record_frame_queued` for a frame the transport never accepted.
+    /// Saturating: a concurrent clear/reset or suspend may already have zeroed
+    /// the window, and the frame can never be acknowledged.
+    pub(in crate::egfx) fn unrecord_unsent_frame(&self) {
+        let _ = self
+            .frames_in_flight
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1));
+        let _ = self
+            .total_queued_frames
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1));
+    }
+
     pub(in crate::egfx) fn record_frame_ack(&self, frame_id: u32, queue_depth: u32) {
         self.client_queue_depth
             .store(queue_depth, Ordering::Release);
