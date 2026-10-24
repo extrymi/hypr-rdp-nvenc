@@ -15,3 +15,7 @@ install -Dm755 /out/pam-probe /usr/local/libexec/hypr-rdp-ci/pam-probe
 install -Dm755 /source/scripts/ci/arch/service-oracle.py /usr/local/libexec/hypr-rdp-ci/service-oracle
 cp /source/scripts/ci/arch/lifecycle.py /root/hypr-rdp-lifecycle.py
 pacman -R --noconfirm hypr-rdp-nvenc
+systemd-machine-id-setup
+# This root is a systemd/PAM test appliance, not a hardware boot. Do not run
+# device discovery, module loading or console gettys on the shared runner kernel.
+systemctl mask systemd-udevd.service systemd-udev-trigger.service systemd-modules-load.service getty@tty1.service
