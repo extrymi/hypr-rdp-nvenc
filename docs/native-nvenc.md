@@ -55,6 +55,8 @@ This cannot isolate a desktop from a kernel/GPU fault on a shared physical GPU.
 The bounded Annex B parser checks start codes, NAL bounds/types, forbidden bit,
 SPS/PPS IDs and references, progressive 8-bit 4:2:0 SPS dimensions, slice type,
 PPS references, increasing slice starts and driver/bitstream IDR agreement.
+Both coded dimensions and displayed dimensions are bounded; cropping is limited
+to macroblock padding, so a small display crop cannot hide a large coded picture.
 Initial/recovery IDR requires current inline SPS and PPS. P frames carry cached
 parameters for the upstream Windows decoder workaround; AUD stays first.
 Parameter cache commits only after the access unit passes these checks.
@@ -82,6 +84,8 @@ owns foreign resources and lifecycle. `annexb.rs` owns bounded framing/cache
 validation. `native/tests.rs` covers ABI, loader, UUID choice, capability errors,
 every acquisition stage, partial buffer allocation, unlocks, delayed input,
 Busy retries, stale metadata, output bounds and cleanup error continuation.
+Failure injection also checks that encode errors terminate the generation and
+that ambiguous unlocks and EOS are never retried during cleanup.
 
 Run only in the disposable CI environment:
 

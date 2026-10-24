@@ -286,6 +286,46 @@ fn delayed_input_is_not_resubmitted_or_locked_and_busy_retries_are_bounded() {
 }
 
 #[test]
+fn encode_errors_are_terminal_and_ambiguous_unlocks_and_eos_are_not_retried() {
+    let packet = &packets()[0];
+    let input = vec![0x42; config().frame_bytes().unwrap()];
+    for (call, pending) in [
+        ("lock-input", false),
+        ("unlock-input", false),
+        ("encode", true),
+        ("lock-output", true),
+        ("unlock-output", false),
+    ] {
+        let fixture = Fixture::new(0, call, 1);
+        fixture.packet(packet);
+        let mut engine = Engine::new(fixture.driver(), config()).unwrap();
+        assert!(engine.encode(frame(&input, 0, false)).is_err(), "{call}");
+        let after_failure = fixture.trace();
+        assert_eq!(engine.encode(frame(&input, 0, false)), Err(Error::Closed));
+        assert_eq!(fixture.trace(), after_failure);
+        engine.close().unwrap();
+        drop(engine);
+        let trace = fixture.trace();
+        assert_eq!(trace.lines().filter(|l| *l == call).count(), 1, "{trace}");
+        assert_eq!(
+            trace.lines().filter(|l| *l == "eos").count(),
+            usize::from(pending),
+            "{trace}"
+        );
+        assert!(!trace.contains("destroy-locked"), "{trace}");
+    }
+    let fixture = Fixture::new(0, "eos", 1);
+    fixture.packet(packet);
+    let mut engine = Engine::new(fixture.driver(), config()).unwrap();
+    engine.encode(frame(&input, 0, false)).unwrap();
+    assert!(engine.drain().is_err());
+    assert_eq!(engine.drain(), Err(Error::Closed));
+    engine.close().unwrap();
+    drop(engine);
+    assert_eq!(fixture.trace().lines().filter(|l| *l == "eos").count(), 1);
+}
+
+#[test]
 fn release_errors_do_not_repeat_ambiguous_calls_or_skip_remaining_resources() {
     for (call, count) in [
         ("destroy-input", 4),

@@ -356,6 +356,12 @@ fn sps(nal: &[u8]) -> Result<(u32, u32, u32), Error> {
             .and_then(|v| v.checked_mul(2))
             .ok_or_else(invalid)?;
     }
+    // The encoder's fixed geometry needs only padding to the next macroblock.
+    // A tiny displayed crop must not hide an oversized coded allocation from
+    // the decoder; bound coded dimensions as well as the displayed dimensions.
+    if w > 8192 || h > 8192 || crop_x >= 16 || crop_y >= 16 {
+        return Err(invalid());
+    }
     let width = w
         .checked_sub(crop_x)
         .filter(|v| *v > 0)
@@ -365,4 +371,19 @@ fn sps(nal: &[u8]) -> Result<(u32, u32, u32), Error> {
         .filter(|v| *v > 0)
         .ok_or_else(invalid)?;
     Ok((id, width, height))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn oversized_coded_geometry_cannot_hide_behind_a_small_display_crop() {
+        // Baseline SPS fixtures describe 16384x64 and 512x64 coded pictures,
+        // both cropped to 64x64. Neither can come from this fixed 64x64 path.
+        for nal in [
+            &b"\x67\x42\x00\x29\xf4\x00\x20\x01\x3c\x00\x3f\xc3\xa0"[..],
+            &b"\x67\x42\x00\x29\xf4\x04\x04\xf0\x1c\x3a"[..],
+        ] {
+            assert!(super::sps(nal).is_err());
+        }
+    }
 }
