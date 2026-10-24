@@ -1,9 +1,21 @@
-use std::{ffi::{c_char, CStr, CString}, mem::{offset_of, size_of}, path::Path};
+use std::{
+    ffi::{c_char, CStr, CString},
+    mem::{offset_of, size_of},
+    path::Path,
+};
 
-use openh264::{decoder::Decoder, encoder::{Encoder, EncoderConfig}, formats::{YUVBuffer, YUVSource}, OpenH264API};
+use openh264::{
+    decoder::Decoder,
+    encoder::{Encoder, EncoderConfig},
+    formats::{YUVBuffer, YUVSource},
+    OpenH264API,
+};
 
 use super::{driver::NativeDriver, ffi::*, loader::Api};
-use crate::nvenc::{annexb::{split, AnnexB}, Config, Driver, Engine, Error, Fault, Frame, Phase, Stamp};
+use crate::nvenc::{
+    annexb::{split, AnnexB},
+    Config, Driver, Engine, Error, Fault, Frame, Phase, Stamp,
+};
 
 extern "C" {
     fn hypr_mock_reset(mode: i32, failure: *const c_char, nth: u32);
@@ -30,15 +42,22 @@ impl Fixture {
         Self
     }
     fn api(&self) -> Api {
-        let (mut cuda, mut enc) = (HYPR_CUDA_FUNCTIONS::default(), NV_ENCODE_API_FUNCTION_LIST::default());
+        let (mut cuda, mut enc) = (
+            HYPR_CUDA_FUNCTIONS::default(),
+            NV_ENCODE_API_FUNCTION_LIST::default(),
+        );
         // SAFETY: C writes its independently compiled function-pointer tables.
         unsafe { hypr_mock_api(&mut cuda, &mut enc) };
         Api::checked(cuda, enc, None).unwrap()
     }
-    fn driver(&self) -> NativeDriver { NativeDriver::with_api(self.api()) }
+    fn driver(&self) -> NativeDriver {
+        NativeDriver::with_api(self.api())
+    }
     fn trace(&self) -> String {
         // SAFETY: fixture returns a NUL-terminated thread-local trace string.
-        unsafe { CStr::from_ptr(hypr_mock_trace()) }.to_string_lossy().into_owned()
+        unsafe { CStr::from_ptr(hypr_mock_trace()) }
+            .to_string_lossy()
+            .into_owned()
     }
     fn packet(&self, bytes: &[u8]) {
         // SAFETY: C copies this slice synchronously and owns its copy.
@@ -50,22 +69,40 @@ impl Drop for Fixture {
         // SAFETY: fixture state is confined to this thread and drivers have been
         // dropped before their fixture by ordinary reverse local drop order.
         let remaining = unsafe { hypr_mock_resources() };
-        if !std::thread::panicking() { assert_eq!(remaining, 0, "{}", self.trace()); }
+        if !std::thread::panicking() {
+            assert_eq!(remaining, 0, "{}", self.trace());
+        }
         unsafe { hypr_mock_reset(0, c"".as_ptr(), 0) };
     }
 }
 
 fn config() -> Config {
-    Config { device: "GPU-01234567-89ab-cdef-0123-456789abcdef".parse().unwrap(), epoch: 23,
-        width: 64, height: 64, fps: 30, bitrate: 4_000_000 }
+    Config {
+        device: "GPU-01234567-89ab-cdef-0123-456789abcdef".parse().unwrap(),
+        epoch: 23,
+        width: 64,
+        height: 64,
+        fps: 30,
+        bitrate: 4_000_000,
+    }
 }
 fn frame(bytes: &[u8], sequence: u64, force_idr: bool) -> Frame<'_> {
-    Frame { stamp: Stamp { epoch: 23, sequence }, force_idr, nv12: bytes }
+    Frame {
+        stamp: Stamp {
+            epoch: 23,
+            sequence,
+        },
+        force_idr,
+        nv12: bytes,
+    }
 }
 fn packets() -> Vec<Vec<u8>> {
     let yuv = YUVBuffer::new(64, 64);
-    let mut encoder = Encoder::with_api_config(OpenH264API::from_source(), EncoderConfig::new()).unwrap();
-    (0..3).map(|_| encoder.encode(&yuv).unwrap().to_vec()).collect()
+    let mut encoder =
+        Encoder::with_api_config(OpenH264API::from_source(), EncoderConfig::new()).unwrap();
+    (0..3)
+        .map(|_| encoder.encode(&yuv).unwrap().to_vec())
+        .collect()
 }
 
 #[test]
@@ -76,8 +113,14 @@ fn generated_rust_layout_and_bitfields_match_independent_c_compilation() {
     unsafe {
         assert_eq!(size_of::<NV_ENC_CONFIG>(), hypr_c_sizeof_config());
         assert_eq!(size_of::<NV_ENC_PIC_PARAMS>(), hypr_c_sizeof_pic());
-        assert_eq!(size_of::<NV_ENCODE_API_FUNCTION_LIST>(), hypr_c_sizeof_api());
-        assert_eq!(offset_of!(NV_ENC_LOCK_BITSTREAM, bitstreamBufferPtr), hypr_c_offset_output());
+        assert_eq!(
+            size_of::<NV_ENCODE_API_FUNCTION_LIST>(),
+            hypr_c_sizeof_api()
+        );
+        assert_eq!(
+            offset_of!(NV_ENC_LOCK_BITSTREAM, bitstreamBufferPtr),
+            hypr_c_offset_output()
+        );
         assert_eq!(hypr_c_bitfield(&mut rc), 1);
     }
     assert_eq!(rc.enableAQ(), 1);
@@ -100,11 +143,20 @@ fn uuid_selection_pitch_copy_settings_metadata_and_decode_round_trip() {
     let mut decoder = Decoder::new().unwrap();
     for (sequence, packet) in packets().into_iter().enumerate() {
         fixture.packet(&packet);
-        let output = engine.encode(frame(&input, sequence as u64, false)).unwrap();
+        let output = engine
+            .encode(frame(&input, sequence as u64, false))
+            .unwrap();
         assert_eq!(output.stamp.sequence, sequence as u64);
-        let picture = decoder.decode(&output.unit.bytes).unwrap().expect("one decoded picture per access unit");
+        let picture = decoder
+            .decode(&output.unit.bytes)
+            .unwrap()
+            .expect("one decoded picture per access unit");
         assert_eq!(picture.dimensions(), (64, 64));
-        let kinds: Vec<_> = split(&output.unit.bytes).unwrap().iter().map(|n| n[0] & 31).collect();
+        let kinds: Vec<_> = split(&output.unit.bytes)
+            .unwrap()
+            .iter()
+            .map(|n| n[0] & 31)
+            .collect();
         assert!(kinds.contains(&7) && kinds.contains(&8));
         assert_eq!(output.unit.is_idr, sequence == 0);
     }
@@ -116,21 +168,44 @@ fn uuid_selection_pitch_copy_settings_metadata_and_decode_round_trip() {
     assert_eq!(trace.lines().filter(|l| *l == "destroy-input").count(), 4);
     assert_eq!(trace.lines().filter(|l| *l == "destroy-output").count(), 4);
     assert!(trace.find("close").unwrap() < trace.find("cu-destroy").unwrap());
-    assert!(!trace.contains("bad-") && !trace.contains("destroy-locked"), "{trace}");
+    assert!(
+        !trace.contains("bad-") && !trace.contains("destroy-locked"),
+        "{trace}"
+    );
 }
 
 #[test]
 fn acquisition_failure_at_each_native_stage_releases_partial_ownership() {
-    for (call, max_n) in [("cu-init",1), ("cu-count",1), ("cu-device",2), ("cu-uuid",2),
-        ("cu-create",1), ("open",1), ("codec-count",1), ("codecs",1), ("specific-count",3),
-        ("profiles",1), ("presets",1), ("formats",1), ("caps",8), ("preset",1),
-        ("initialize",1), ("create-input",4), ("create-output",4)] {
+    for (call, max_n) in [
+        ("cu-init", 1),
+        ("cu-count", 1),
+        ("cu-device", 2),
+        ("cu-uuid", 2),
+        ("cu-create", 1),
+        ("open", 1),
+        ("codec-count", 1),
+        ("codecs", 1),
+        ("specific-count", 3),
+        ("profiles", 1),
+        ("presets", 1),
+        ("formats", 1),
+        ("caps", 8),
+        ("preset", 1),
+        ("initialize", 1),
+        ("create-input", 4),
+        ("create-output", 4),
+    ] {
         for nth in 1..=max_n {
             let fixture = Fixture::new(0, call, nth);
             let result = Engine::new(fixture.driver(), config());
             assert!(result.is_err(), "{call}/{nth}: {}", fixture.trace());
             drop(result);
-            assert_eq!(unsafe { hypr_mock_resources() }, 0, "{call}/{nth}: {}", fixture.trace());
+            assert_eq!(
+                unsafe { hypr_mock_resources() },
+                0,
+                "{call}/{nth}: {}",
+                fixture.trace()
+            );
         }
     }
 }
@@ -142,8 +217,15 @@ fn unsupported_formats_unbounded_counts_and_null_success_handles_fail_closed() {
         assert!(Engine::new(fixture.driver(), config()).is_err());
     }
     let fixture = Fixture::new(0, "", 0);
-    let mut cfg = config(); cfg.device = "GPU-ffffffff-ffff-ffff-ffff-ffffffffffff".parse().unwrap();
-    assert!(matches!(Engine::new(fixture.driver(), cfg), Err(Error::Backend { fault: Fault::DeviceUnavailable, .. })));
+    let mut cfg = config();
+    cfg.device = "GPU-ffffffff-ffff-ffff-ffff-ffffffffffff".parse().unwrap();
+    assert!(matches!(
+        Engine::new(fixture.driver(), cfg),
+        Err(Error::Backend {
+            fault: Fault::DeviceUnavailable,
+            ..
+        })
+    ));
     assert!(!fixture.trace().contains("cu-create"));
 }
 
@@ -153,7 +235,13 @@ fn output_failures_always_unlock_and_never_forward_invalid_or_stale_data() {
         let fixture = Fixture::new(mode, "", 0);
         fixture.packet(&packets()[0]);
         let mut engine = Engine::new(fixture.driver(), config()).unwrap();
-        assert!(engine.encode(frame(&vec![0x42; config().frame_bytes().unwrap()], 0, false)).is_err());
+        assert!(engine
+            .encode(frame(
+                &vec![0x42; config().frame_bytes().unwrap()],
+                0,
+                false
+            ))
+            .is_err());
         drop(engine);
         let trace = fixture.trace();
         let lock = if mode == 5 { "input" } else { "output" };
@@ -168,25 +256,51 @@ fn delayed_input_is_not_resubmitted_or_locked_and_busy_retries_are_bounded() {
         let fixture = Fixture::new(mode, "", 0);
         fixture.packet(&packets()[0]);
         let mut engine = Engine::new(fixture.driver(), config()).unwrap();
-        let result = engine.encode(frame(&vec![0x42; config().frame_bytes().unwrap()], 0, false));
-        if mode == 6 { assert_eq!(result, Err(Error::backend(Phase::Encode, Fault::DelayedOutput))); }
-        else { assert!(result.is_ok()); }
+        let result = engine.encode(frame(
+            &vec![0x42; config().frame_bytes().unwrap()],
+            0,
+            false,
+        ));
+        if mode == 6 {
+            assert_eq!(
+                result,
+                Err(Error::backend(Phase::Encode, Fault::DelayedOutput))
+            );
+        } else {
+            assert!(result.is_ok());
+        }
         drop(engine);
         let trace = fixture.trace();
-        assert_eq!(trace.lines().filter(|l| *l == "encode").count(), if mode == 6 { 1 } else { 3 });
-        assert_eq!(trace.lines().filter(|l| *l == "lock-output").count(), usize::from(mode == 7));
-        if mode == 6 { assert_eq!(trace.lines().filter(|l| *l == "eos").count(), 1); }
+        assert_eq!(
+            trace.lines().filter(|l| *l == "encode").count(),
+            if mode == 6 { 1 } else { 3 }
+        );
+        assert_eq!(
+            trace.lines().filter(|l| *l == "lock-output").count(),
+            usize::from(mode == 7)
+        );
+        if mode == 6 {
+            assert_eq!(trace.lines().filter(|l| *l == "eos").count(), 1);
+        }
     }
 }
 
 #[test]
 fn release_errors_do_not_repeat_ambiguous_calls_or_skip_remaining_resources() {
-    for (call, count) in [("destroy-input",4), ("destroy-output",4), ("close",1), ("cu-destroy",1)] {
+    for (call, count) in [
+        ("destroy-input", 4),
+        ("destroy-output", 4),
+        ("close", 1),
+        ("cu-destroy", 1),
+    ] {
         let fixture = Fixture::new(0, call, 1);
         let mut engine = Engine::new(fixture.driver(), config()).unwrap();
         assert!(engine.close().is_err());
         drop(engine);
-        assert_eq!(fixture.trace().lines().filter(|l| *l == call).count(), count);
+        assert_eq!(
+            fixture.trace().lines().filter(|l| *l == call).count(),
+            count
+        );
         assert!(fixture.trace().contains("cu-destroy"));
     }
 }
@@ -202,7 +316,13 @@ fn real_dlopen_checks_api_version_function_table_and_library_lifetime_without_gp
     let resources = unsafe { library.get::<Resources>(b"hypr_mock_resources\0") }.unwrap();
     for mode in [12, 13] {
         unsafe { reset(mode, c"".as_ptr(), 0) };
-        assert!(matches!(Api::load_paths(path, path), Err(Error::Backend { fault: Fault::ApiUnsupported, .. })));
+        assert!(matches!(
+            Api::load_paths(path, path),
+            Err(Error::Backend {
+                fault: Fault::ApiUnsupported,
+                ..
+            })
+        ));
         assert_eq!(unsafe { resources() }, 0);
     }
     unsafe { reset(0, c"".as_ptr(), 0) };
@@ -211,20 +331,52 @@ fn real_dlopen_checks_api_version_function_table_and_library_lifetime_without_gp
     driver.initialize(&config()).unwrap();
     drop(driver);
     assert_eq!(unsafe { resources() }, 0);
-    assert!(matches!(Api::missing_libraries(), Err(Error::Backend { fault: Fault::LibraryMissing, .. })));
+    assert!(matches!(
+        Api::missing_libraries(),
+        Err(Error::Backend {
+            fault: Fault::LibraryMissing,
+            ..
+        })
+    ));
 }
 
 #[test]
 fn annexb_rejects_bad_boundaries_parameter_sets_geometry_and_idr_mismatch() {
     let first = &packets()[0];
-    for bad in [&[][..], &[0,0,1], &[0,0,1,0x65,0x80], &[1,0,0,1,0x65,0x80]] {
-        assert!(AnnexB::default().normalize(bad, 64, 64, true, true).is_err());
+    for bad in [
+        &[][..],
+        &[0, 0, 1],
+        &[0, 0, 1, 0x65, 0x80],
+        &[1, 0, 0, 1, 0x65, 0x80],
+    ] {
+        assert!(AnnexB::default()
+            .normalize(bad, 64, 64, true, true)
+            .is_err());
     }
-    assert!(AnnexB::default().normalize(first, 66, 64, true, true).is_err());
-    assert!(AnnexB::default().normalize(first, 64, 64, true, false).is_err());
-    let without_pps: Vec<u8> = split(first).unwrap().iter().filter(|n| n[0] & 31 != 8).flat_map(|n| [vec![0,0,0,1], n.to_vec()].concat()).collect();
-    assert!(AnnexB::default().normalize(&without_pps, 64, 64, true, true).is_err());
-    assert!(AnnexB::default().normalize(&[first.as_slice(), first.as_slice()].concat(), 64, 64, true, true).is_err());
+    assert!(AnnexB::default()
+        .normalize(first, 66, 64, true, true)
+        .is_err());
+    assert!(AnnexB::default()
+        .normalize(first, 64, 64, true, false)
+        .is_err());
+    let without_pps: Vec<u8> = split(first)
+        .unwrap()
+        .iter()
+        .filter(|n| n[0] & 31 != 8)
+        .flat_map(|n| [vec![0, 0, 0, 1], n.to_vec()].concat())
+        .collect();
+    assert!(AnnexB::default()
+        .normalize(&without_pps, 64, 64, true, true)
+        .is_err());
+    assert!(AnnexB::default()
+        .normalize(
+            &[first.as_slice(), first.as_slice()].concat(),
+            64,
+            64,
+            true,
+            true
+        )
+        .is_err());
 }
 
 proptest::proptest! {

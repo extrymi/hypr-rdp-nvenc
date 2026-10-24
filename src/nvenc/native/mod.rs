@@ -4,8 +4,16 @@ mod loader;
 
 // These bindings are generated from the pinned third-party C headers. Their
 // naming, unused declarations and unsafe bitfield accessors are not handwritten.
-#[allow(non_camel_case_types, non_snake_case, non_upper_case_globals, dead_code, clippy::all)]
-mod ffi { include!(concat!(env!("OUT_DIR"), "/nvenc.rs")); }
+#[allow(
+    non_camel_case_types,
+    non_snake_case,
+    non_upper_case_globals,
+    dead_code,
+    clippy::all
+)]
+mod ffi {
+    include!(concat!(env!("OUT_DIR"), "/nvenc.rs"));
+}
 
 /// No library is loaded until the supervisor has persisted the worker identity
 /// and sent Init. Existing serve() owns the CPU-bounded protocol and lifecycle.
