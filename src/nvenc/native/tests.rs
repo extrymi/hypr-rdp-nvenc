@@ -421,6 +421,55 @@ fn annexb_rejects_bad_boundaries_parameter_sets_geometry_and_idr_mismatch() {
         .is_err());
 }
 
+/// Structural-only fixture: OpenH264 emits CAVLC. Setting the PPS entropy flag
+/// makes our parser treat the slices as CABAC; the result is not decodable.
+/// Each slice NAL gets one cabac_zero_word, encapsulated as 00 00 03 (7.4.1).
+fn with_entropy_flag_and_zero_word(packet: &[u8], cabac: bool) -> Vec<u8> {
+    split(packet)
+        .unwrap()
+        .iter()
+        .flat_map(|nal| {
+            let mut nal = nal.to_vec();
+            match nal[0] & 31 {
+                // pic_parameter_set_id ue(0) = '1', seq_parameter_set_id ue(0) = '1',
+                // then entropy_coding_mode_flag (7.3.2.2).
+                8 => {
+                    assert_eq!(nal[1] & 0b1100_0000, 0b1100_0000);
+                    if cabac {
+                        nal[1] |= 0b0010_0000;
+                    } else {
+                        nal[1] &= !0b0010_0000;
+                    }
+                }
+                1 | 5 => {
+                    assert_ne!(nal.last(), Some(&0), "slice must end in its stop-bit byte");
+                    nal.extend_from_slice(&[0, 0, 3]);
+                }
+                _ => {}
+            }
+            [vec![0, 0, 0, 1], nal].concat()
+        })
+        .collect()
+}
+
+#[test]
+fn cabac_zero_word_tail_is_kept_for_cabac_slices_and_rejected_for_cavlc() {
+    let first = &packets()[0];
+    let cabac = with_entropy_flag_and_zero_word(first, true);
+    let unit = AnnexB::default()
+        .normalize(&cabac, 64, 64, true, true)
+        .expect("H.264 7.4.1: a CABAC slice may end in cabac_zero_word");
+    assert!(split(&unit.bytes)
+        .unwrap()
+        .iter()
+        .any(|nal| nal[0] & 31 == 5 && nal.ends_with(&[0, 0, 3])));
+    // 7.3.2.10: cabac_zero_word exists only when entropy_coding_mode_flag is 1.
+    let cavlc = with_entropy_flag_and_zero_word(first, false);
+    assert!(AnnexB::default()
+        .normalize(&cavlc, 64, 64, true, true)
+        .is_err());
+}
+
 proptest::proptest! {
     #[test]
     fn bounded_random_annexb_never_panics(bytes in proptest::collection::vec(proptest::prelude::any::<u8>(), 0..4096)) {
