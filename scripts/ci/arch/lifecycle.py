@@ -93,6 +93,10 @@ packages_before = run("pacman", "-Q").stdout
 listeners_before = run("ss", "-H", "-lnt").stdout
 run("pacman", "-U", "--noconfirm", V1)
 run("pacman", "-Qkk", "hypr-rdp-nvenc")
+for owned_path in run("pacman", "-Qlq", "hypr-rdp-nvenc").stdout.splitlines():
+    info = Path(owned_path).lstat()
+    assert info.st_uid == 0 and info.st_gid == 0, owned_path
+binary_hash = digest(Path("/usr/bin/hypr-rdp"))
 assert not CONFIG.exists()
 assert listeners_before == run("ss", "-H", "-lnt").stdout
 run("systemctl", "start", "user@1100.service")
@@ -110,6 +114,8 @@ record("unit refuses a missing graphical-session environment")
 # Retain the actual packaged preflight; only ExecStart is a CPU fixture.
 dropin = HOME / ".config/systemd/user" / (UNIT + ".d") / "ci.conf"
 write_user(dropin, "[Service]\nExecStart=\nExecStart=/usr/local/libexec/hypr-rdp-ci/service-oracle\nRestartSec=100ms\nTimeoutStopSec=2\n")
+desktop_target = HOME / ".config/systemd/user/hypr-rdp-ci-desktop.target"
+write_user(desktop_target, "[Unit]\nDescription=CPU fixture graphical session\nBindsTo=graphical-session.target\nAfter=graphical-session.target\n", 0o644)
 ctl("daemon-reload")
 ctl("set-environment", "WAYLAND_DISPLAY=ci-wayland", "HYPRLAND_INSTANCE_SIGNATURE=ci-instance",
     "SSLKEYLOGFILE=/home/tester/should-not-exist.keys")
@@ -164,30 +170,33 @@ assert prop("ActiveState") == "inactive" and prop("NRestarts") == "0"
 (CONFIG / "key.pem").chmod(0o600)
 record("bad TLS permissions: production preflight skips unit without retries")
 
-ctl("start", "graphical-session.target")
+ctl("reset-failed", UNIT)  # Start a separate lifecycle scenario with a fresh budget.
+ctl("start", "hypr-rdp-ci-desktop.target")
 ctl("start", UNIT)
 wait_for(lambda: (CONFIG / "oracle.json").exists())
 oracle = json.loads((CONFIG / "oracle.json").read_text())
 assert oracle["umask"] == 0o077 and not oracle["keylog_present"]
 assert oracle["wayland"] == "ci-wayland" and oracle["instance"] == "ci-instance"
 assert prop("NoNewPrivileges") == "no"
-ctl("stop", "graphical-session.target")
+ctl("stop", "hypr-rdp-ci-desktop.target")
 wait_for(lambda: not Path(f'/proc/{oracle["pid"]}').exists() and
          not Path(f'/proc/{oracle["child"]}').exists())
 assert prop("ActiveState") == "inactive" and not (HOME / "should-not-exist.keys").exists()
 record("real user manager: environment, private umask, no keylog, target stop/reap")
 
 (CONFIG / "oracle.json").unlink()
+ctl("reset-failed", UNIT)
 write_user(CONFIG / "ignore-stop", "ignore\n")
 unrelated = subprocess.Popen(["sleep", "120"])
 try:
     ctl("start", UNIT)
     wait_for(lambda: (CONFIG / "oracle.json").exists())
     oracle = json.loads((CONFIG / "oracle.json").read_text())
-    ctl("stop", UNIT)
+    ctl("stop", UNIT, ok=False)  # A stop timeout may make systemctl return nonzero.
     wait_for(lambda: not Path(f'/proc/{oracle["pid"]}').exists() and
              not Path(f'/proc/{oracle["child"]}').exists())
     assert unrelated.poll() is None
+    assert prop("Result") == "timeout"
 finally:
     unrelated.terminate()
     unrelated.wait(timeout=5)
@@ -217,6 +226,7 @@ for package, version in ((V2, "0.1.7.nvenc1-2"), (V1, "0.1.7.nvenc1-1")):
     run("pacman", "-U", "--noconfirm", package)
     assert run("pacman", "-Q", "hypr-rdp-nvenc").stdout.strip().endswith(version)
     assert digest(pam_path) == pam_hash
+    assert digest(Path("/usr/bin/hypr-rdp")) == binary_hash
     assert config_hashes == {name: digest(CONFIG / name) for name in config_hashes}
     user("hypr-rdp", "--check-config", "--config", CONFIG / "config.toml")
     assert prop("ActiveState") == "inactive"
@@ -240,6 +250,7 @@ for path in CONFIG.iterdir():
 CONFIG.rmdir()
 dropin.unlink()
 dropin.parent.rmdir()
+desktop_target.unlink()
 Path(str(pam_path) + ".pacsave").unlink()
 shutil.rmtree(fixtures)  # Entire tree belongs to this test.
 assert not Path("/run/user/1100/hypr-rdp-nvenc").exists()
