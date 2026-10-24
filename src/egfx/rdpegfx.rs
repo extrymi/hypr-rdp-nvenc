@@ -11,6 +11,18 @@ use super::output_queue::EgfxOutputLease;
 use super::{avc420, Avc444FrameEncoding, EgfxFrameReadiness, EgfxShared};
 use super::{EncodedEgfxFrame, EncodedFrameState};
 
+#[cfg(test)]
+pub(in crate::egfx) type PublishHookFn = Box<dyn FnMut(u32)>;
+
+#[cfg(test)]
+thread_local! {
+    /// Test seam: runs on the sending thread right after the transport event
+    /// channel accepted a frame. Production can already write that frame and
+    /// process its FrameAcknowledge on the IronRDP task inside this window.
+    pub(in crate::egfx) static AFTER_PUBLISH: std::cell::RefCell<Option<PublishHookFn>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 pub(in crate::egfx) struct QueuedRdpegfxFrame {
     pub(in crate::egfx) frame_id: u32,
     pub(in crate::egfx) dvc_messages: Vec<DvcMessage>,
@@ -686,6 +698,8 @@ impl EgfxShared {
         codec_name: &'static str,
         trace_name: &'static str,
     ) -> bool {
+        #[cfg(test)]
+        let frame_id = queued.frame_id;
         match ironrdp_dvc::encode_dvc_messages(
             queued.channel_id,
             queued.dvc_messages,
@@ -703,6 +717,12 @@ impl EgfxShared {
                     tracing::trace!("{trace_name}: EGFX event channel closed");
                     return false;
                 }
+                #[cfg(test)]
+                AFTER_PUBLISH.with_borrow_mut(|hook| {
+                    if let Some(hook) = hook.as_mut() {
+                        hook(frame_id);
+                    }
+                });
             }
             Err(e) => {
                 tracing::error!("Failed to encode EGFX {} frame: {}", codec_name, e);

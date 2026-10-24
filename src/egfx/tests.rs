@@ -3,7 +3,7 @@ use super::test_support::{
     ack_frame, assert_wire_to_surface_frame, decode_avc444_wire_to_surface, decode_gfx_output,
     drain_gfx_pdus, negotiated_avc420_session, ready_avc420_session, ready_avc444_handle,
     ready_tracked_avc420_session, tracked_avc444_session, unnegotiated_egfx_session,
-    TEST_CHANNEL_ID,
+    TEST_CHANNEL_ID, TestGfxSession,
 };
 use super::*;
 use ironrdp_core::{encode_vec, Decode, Encode, ReadCursor};
@@ -1976,4 +1976,113 @@ fn clearcodec_transport_backpressure_and_suspended_ack_preserve_sequence() {
             &damage,
         );
     }
+}
+
+/// Installs the publication hook for one test and always removes it.
+struct PublishHook;
+
+impl PublishHook {
+    fn install(hook: impl FnMut(u32) + 'static) -> Self {
+        super::rdpegfx::AFTER_PUBLISH.with_borrow_mut(|slot| *slot = Some(Box::new(hook)));
+        Self
+    }
+}
+
+impl Drop for PublishHook {
+    fn drop(&mut self) {
+        super::rdpegfx::AFTER_PUBLISH.with_borrow_mut(|slot| *slot = None);
+    }
+}
+
+/// Acknowledges each published frame through the real DVC/IronRDP path
+/// before the sending thread returns from the transport send.
+fn ack_inside_publication_window(
+    bridge: ironrdp_server::GfxDvcBridge,
+) -> (PublishHook, std::rc::Rc<std::cell::Cell<u32>>) {
+    let bridge = std::cell::RefCell::new(bridge);
+    let acked = std::rc::Rc::new(std::cell::Cell::new(0));
+    let counter = std::rc::Rc::clone(&acked);
+    let hook = PublishHook::install(move |frame_id| {
+        ack_frame(&mut bridge.borrow_mut(), frame_id, QueueDepth::AvailableBytes(8));
+        counter.set(counter.get() + 1);
+    });
+    (hook, acked)
+}
+
+#[test]
+fn avc420_ack_inside_publication_window_releases_local_window() {
+    let (shared, bridge, handle, surface_id, event_tx, mut event_rx) =
+        ready_tracked_avc420_session(64, 64, DEFAULT_MAX_FRAMES_IN_FLIGHT);
+    let _ = drain_gfx_pdus(&mut event_rx);
+    let regions = [Avc420Region::new(0, 0, 64, 64, 21, 79)];
+    let (_hook, acked) = ack_inside_publication_window(bridge);
+
+    for timestamp in 0..2 * DEFAULT_MAX_FRAMES_IN_FLIGHT {
+        assert!(shared.send_tracked_avc420_rdpegfx_frame(
+            &handle,
+            &event_tx,
+            surface_id,
+            &[0, 0, 1, 0x65, 0xaa],
+            &regions,
+            timestamp,
+        ));
+        assert_eq!(shared.frames_in_flight(), 0, "ACK for frame {timestamp} was lost");
+        // Delivered output releases its queue lease, as the transport would.
+        let _ = drain_gfx_pdus(&mut event_rx);
+    }
+    assert_eq!(acked.get(), 2 * DEFAULT_MAX_FRAMES_IN_FLIGHT);
+    assert!(shared.full_frame_refresh_readiness().is_ready());
+}
+
+#[test]
+fn avc444_ack_inside_publication_window_releases_local_window() {
+    let TestGfxSession {
+        shared,
+        bridge,
+        handle,
+        event_tx,
+        mut event_rx,
+    } = tracked_avc444_session(64, 64, DEFAULT_MAX_FRAMES_IN_FLIGHT);
+    let surface_id =
+        EgfxShared::init_surface(&handle, &event_tx, 64, 64).expect("surface init");
+    let _ = drain_gfx_pdus(&mut event_rx);
+    let regions = [Avc420Region::new(0, 0, 64, 64, 21, 79)];
+    let (_hook, acked) = ack_inside_publication_window(bridge);
+
+    assert!(shared.send_tracked_avc444_rdpegfx_frame(
+        &handle,
+        &event_tx,
+        surface_id,
+        Avc444FrameEncoding::Luma,
+        &[0, 0, 1, 0x65, 0xaa],
+        &regions,
+        None,
+        None,
+        123,
+    ));
+    assert_eq!(acked.get(), 1);
+    assert_eq!(
+        shared.frames_in_flight(),
+        0,
+        "AVC444 ACK inside the publication window was lost"
+    );
+}
+
+#[test]
+fn rejected_publication_leaves_no_local_charge() {
+    let (shared, _bridge, handle, surface_id, event_tx, mut event_rx) =
+        ready_tracked_avc420_session(64, 64, DEFAULT_MAX_FRAMES_IN_FLIGHT);
+    let _ = drain_gfx_pdus(&mut event_rx);
+    drop(event_rx);
+    let regions = [Avc420Region::new(0, 0, 64, 64, 21, 79)];
+    assert!(!shared.send_tracked_avc420_rdpegfx_frame(
+        &handle,
+        &event_tx,
+        surface_id,
+        &[0, 0, 1, 0x65, 0xaa],
+        &regions,
+        123,
+    ));
+    let flow = shared.frame_flow_snapshot();
+    assert_eq!((flow.frames_in_flight, flow.total_queued_frames), (0, 0));
 }
