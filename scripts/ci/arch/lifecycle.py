@@ -58,11 +58,20 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def fingerprint(path):
+    info = path.stat()
+    return (digest(path), info.st_mode, info.st_uid, info.st_gid, info.st_mtime_ns)
+
+
 def write_user(path, text, mode=0o600):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
     path.chmod(mode)
-    run("chown", "-R", "tester:tester", HOME / ".config")
+    os.chown(path, 1100, 1100)
+    for parent in path.parents:
+        if parent == HOME:
+            break
+        os.chown(parent, 1100, 1100)
 
 
 assert Path("/.dockerenv").exists()
@@ -78,7 +87,8 @@ sentinels = {
 for path, text in sentinels.items():
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
-snapshot = {str(path): digest(path) for path in sentinels}
+run("chown", "-R", "tester:tester", HOME / ".config")
+snapshot = {str(path): fingerprint(path) for path in sentinels}
 packages_before = run("pacman", "-Q").stdout
 listeners_before = run("ss", "-H", "-lnt").stdout
 run("pacman", "-U", "--noconfirm", V1)
@@ -168,6 +178,24 @@ assert prop("ActiveState") == "inactive" and not (HOME / "should-not-exist.keys"
 record("real user manager: environment, private umask, no keylog, target stop/reap")
 
 (CONFIG / "oracle.json").unlink()
+write_user(CONFIG / "ignore-stop", "ignore\n")
+unrelated = subprocess.Popen(["sleep", "120"])
+try:
+    ctl("start", UNIT)
+    wait_for(lambda: (CONFIG / "oracle.json").exists())
+    oracle = json.loads((CONFIG / "oracle.json").read_text())
+    ctl("stop", UNIT)
+    wait_for(lambda: not Path(f'/proc/{oracle["pid"]}').exists() and
+             not Path(f'/proc/{oracle["child"]}').exists())
+    assert unrelated.poll() is None
+finally:
+    unrelated.terminate()
+    unrelated.wait(timeout=5)
+(CONFIG / "ignore-stop").unlink()
+(CONFIG / "oracle.json").unlink()
+ctl("reset-failed", UNIT)
+record("stop escalation kills only this unit's hung parent/child, preserving an unrelated process")
+
 write_user(CONFIG / "fail-oracle", "fail\n")
 ctl("start", UNIT, ok=False)
 wait_for(lambda: prop("ActiveState") == "failed")
@@ -215,7 +243,7 @@ dropin.parent.rmdir()
 Path(str(pam_path) + ".pacsave").unlink()
 shutil.rmtree(fixtures)  # Entire tree belongs to this test.
 assert not Path("/run/user/1100/hypr-rdp-nvenc").exists()
-assert snapshot == {str(path): digest(path) for path in sentinels}
+assert snapshot == {str(path): fingerprint(path) for path in sentinels}
 assert listeners_before == run("ss", "-H", "-lnt").stdout
 record("full fixture cleanup preserves desktop/SSH/VPN/firewall files and listeners")
 

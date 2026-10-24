@@ -58,6 +58,12 @@ matching nvidia-utils through the test system's normal package management.
 API 13.1 needs driver 610+; a version number alone does not prove encoder caps.
 CUDA toolkit and FFmpeg are not required by this backend.
 
+Original MIT and NVIDIA interface-header notices are retained. Dependency notice
+files are copied from the exact Cargo-resolved sources, including nested native
+library notices for OpenH264, AWS-LC and ring. The dependency-licenses/index.json
+records source/version/SPDX fields and any crates without standalone notices;
+it includes build/dev/platform dependencies and is not a legal compliance opinion.
+
 ## Configure the existing desktop
 
 Run these steps as the user who owns the Hyprland session, not as root. Preserve
@@ -191,6 +197,9 @@ Remove only the config.toml/password/cert.pem/key.pem/.tls.lock you created in
 modified `/etc/pam.d/hypr-rdp.pacsave` only if it belongs to this installation.
 These names are shared with upstream: preserve them when returning to upstream.
 Use `rmdir` for now-empty directories; do not recursively delete a user's config.
+After interrupted provisioning, inspect any `.tls-stage.*` (helper) or
+`.tls-pending-*` (server) directory. Once no provisioner is running, remove only
+the files from that abandoned attempt; these directories can contain private keys.
 Remove only this test identity's client trust entry and saved RDP credentials.
 
 NVENC lease records live under `$XDG_RUNTIME_DIR/hypr-rdp-nvenc`. After a clean
