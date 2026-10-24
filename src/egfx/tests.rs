@@ -3,7 +3,7 @@ use super::test_support::{
     ack_frame, assert_wire_to_surface_frame, decode_avc444_wire_to_surface, decode_gfx_output,
     drain_gfx_pdus, negotiated_avc420_session, ready_avc420_session, ready_avc444_handle,
     ready_tracked_avc420_session, tracked_avc444_session, unnegotiated_egfx_session,
-    TEST_CHANNEL_ID, TestGfxSession,
+    TestGfxSession, TEST_CHANNEL_ID,
 };
 use super::*;
 use ironrdp_core::{encode_vec, Decode, Encode, ReadCursor};
@@ -2003,7 +2003,11 @@ fn ack_inside_publication_window(
     let acked = std::rc::Rc::new(std::cell::Cell::new(0));
     let counter = std::rc::Rc::clone(&acked);
     let hook = PublishHook::install(move |frame_id| {
-        ack_frame(&mut bridge.borrow_mut(), frame_id, QueueDepth::AvailableBytes(8));
+        ack_frame(
+            &mut bridge.borrow_mut(),
+            frame_id,
+            QueueDepth::AvailableBytes(8),
+        );
         counter.set(counter.get() + 1);
     });
     (hook, acked)
@@ -2026,7 +2030,11 @@ fn avc420_ack_inside_publication_window_releases_local_window() {
             &regions,
             timestamp,
         ));
-        assert_eq!(shared.frames_in_flight(), 0, "ACK for frame {timestamp} was lost");
+        assert_eq!(
+            shared.frames_in_flight(),
+            0,
+            "ACK for frame {timestamp} was lost"
+        );
         // Delivered output releases its queue lease, as the transport would.
         let _ = drain_gfx_pdus(&mut event_rx);
     }
@@ -2043,8 +2051,7 @@ fn avc444_ack_inside_publication_window_releases_local_window() {
         event_tx,
         mut event_rx,
     } = tracked_avc444_session(64, 64, DEFAULT_MAX_FRAMES_IN_FLIGHT);
-    let surface_id =
-        EgfxShared::init_surface(&handle, &event_tx, 64, 64).expect("surface init");
+    let surface_id = EgfxShared::init_surface(&handle, &event_tx, 64, 64).expect("surface init");
     let _ = drain_gfx_pdus(&mut event_rx);
     let regions = [Avc420Region::new(0, 0, 64, 64, 21, 79)];
     let (_hook, acked) = ack_inside_publication_window(bridge);
