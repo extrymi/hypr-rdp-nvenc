@@ -11,19 +11,22 @@ impl FromStr for DeviceId {
 
     fn from_str(value: &str) -> Result<Self, Error> {
         let suffix = value.strip_prefix("GPU-").ok_or(Error::InvalidConfig)?;
-        if suffix.len() != 36
-            || !suffix.bytes().enumerate().all(|(i, byte)| {
-                if [8, 13, 18, 23].contains(&i) {
-                    byte == b'-'
-                } else {
-                    byte.is_ascii_hexdigit()
-                }
-            })
-        {
+        if !valid_uuid(suffix) {
             return Err(Error::InvalidConfig);
         }
-        Ok(Self(value.to_ascii_lowercase().replacen("gpu-", "GPU-", 1)))
+        Ok(Self(format!("GPU-{}", suffix.to_ascii_lowercase())))
     }
+}
+
+pub(super) fn valid_uuid(value: &str) -> bool {
+    value.len() == 36
+        && value.bytes().enumerate().all(|(i, byte)| {
+            if [8, 13, 18, 23].contains(&i) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
 }
 
 impl fmt::Display for DeviceId {

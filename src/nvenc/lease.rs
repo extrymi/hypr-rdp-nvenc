@@ -128,7 +128,11 @@ impl DeviceLease {
 
 fn parse_record(text: &str) -> Result<Record, Error> {
     let fields: Vec<_> = text.lines().collect();
-    if text.len() > 256 || fields.len() != 4 || fields[0] != "1" || fields[1].len() != 36 {
+    if text.len() > 256
+        || fields.len() != 4
+        || fields[0] != "1"
+        || !super::types::valid_uuid(fields[1])
+    {
         return Err(Error::StateStore);
     }
     let record = Record {
@@ -192,6 +196,7 @@ mod tests {
             "",
             "1\n",
             "1\nboot\n12\n",
+            "1\nzzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz\n1\n2\n",
             "2\n00000000-0000-0000-0000-000000000000\n1\n2\n",
         ] {
             assert!(parse_record(text).is_err());
