@@ -3,6 +3,12 @@
 This stage prepares reproducible source inputs and a disposable CPU CI build.
 It adds no NVENC code and does not install or launch the server on the workstation.
 
+This document records the original phase-1 baseline. Later stacked changes add
+the [NVENC lifecycle](nvenc-development.md) and
+[startup validation](startup-validation.md). Phase 3 makes the already locked
+x509-cert 0.3.0 a direct dependency and updates the two manifest hashes explicitly;
+the set of 484 packages and their versions/checksums stay unchanged.
+
 ## What is fixed
 
 - Upstream: `MuNeNiCK/hypr-rdp` at `730020b8795b6f6a57a69f441414a80d2a8505d5` (0.1.7).

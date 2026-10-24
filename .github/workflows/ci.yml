@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main, codex/cpu-baseline]
+    branches: [main, codex/cpu-baseline, codex/nvenc-lifecycle]
 
 permissions:
   contents: read
@@ -75,6 +75,9 @@ jobs:
           for attempt in 1 2 3 4 5; do
             cargo test --frozen --test nvenc_worker -- --test-threads=4 2>&1 | tee "artifacts/test-nvenc-worker-${attempt}.log"
           done
+
+      - name: Check startup without desktop access
+        run: cargo test --frozen --test startup 2>&1 | tee artifacts/test-startup.log
 
       - name: Test default features
         run: cargo test --frozen 2>&1 | tee artifacts/test-default.log

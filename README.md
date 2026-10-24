@@ -1,5 +1,11 @@
 # hypr-rdp
 
+Development fork: NVIDIA support is under construction. The current changes are
+documented in [NVENC development](docs/nvenc-development.md) and
+[startup validation](docs/startup-validation.md). CPU CI artifacts are not a
+deployment release or a qualified NVIDIA build. Installation examples below
+describe upstream; the fork's Arch package is a later stage.
+
 Native RDP server for Hyprland.
 
 - H.264 video with VA-API acceleration and automatic software fallback
@@ -86,8 +92,11 @@ session, set `WAYLAND_DISPLAY`; set `HYPRLAND_INSTANCE_SIGNATURE` too if instanc
 discovery is ambiguous.
 
 With configured username/password credentials, a new authenticated connection
-replaces the current one. In the default authentication mode, omitting credentials
-allows unauthenticated connections, served one at a time.
+replaces the current one. The default `configured` mode requires both a nonempty
+username and password (or `password_file`). To deliberately allow unauthenticated
+connections, set `auth_mode = "none"` and remove all credential/PAM fields;
+these connections are served one at a time. Missing credentials no longer select
+this mode implicitly.
 
 ## Configuration
 
@@ -107,6 +116,23 @@ fps = 30
 
 CLI arguments override the config file. Use `password_file` instead of `password`
 to read a password from a file, or `--password-file` on the command line.
+Unknown config keys and invalid values stop startup. Parse diagnostics include
+the location and error category, without printing the source line.
+
+Validate the existing configuration, authentication prerequisites and TLS files
+without connecting to Hyprland, creating TLS files, listening or running hooks:
+
+```sh
+hypr-rdp --check-config --config ~/.config/hypr-rdp/config.toml
+```
+
+Supply both `cert` and `key` or use an existing default pair at
+`~/.config/hypr-rdp/{cert,key}.pem`. TLS private keys must be regular files with
+no group/other permissions (normally `0600` or `0400`). Certificates must be
+currently valid and match the key. Normal startup creates a default pair only
+when both files are absent. An incomplete or invalid saved pair causes an error;
+restore a known matching pair instead of silently changing the server identity.
+See [migration and rollback](docs/startup-validation.md) for the exact scope.
 
 To use the desktop user's Linux password, set `auth_mode = "pam"` and remove
 `username`, `password`, and `password_file`. Install the appropriate
@@ -121,7 +147,7 @@ Run `hypr-rdp --help` for all options.
 
 | Option | Values / purpose | Default |
 | --- | --- | --- |
-| `--auth-mode` | `configured` credentials or Linux `pam` | `configured` |
+| `--auth-mode` | `configured` credentials, Linux `pam`, or explicit `none` | `configured` |
 | `--pam-service` | PAM service name | `hypr-rdp` |
 | `--capture-mode` | `wlr` or `ext` capture protocol | `wlr` |
 | `--egfx-codec` | `avc420`, experimental `avc444`, `auto`, or `clearcodec` (lossless, damage-only ClearCodec instead of H.264 for EGFX clients) | `avc420` |
@@ -133,6 +159,7 @@ Run `hypr-rdp --help` for all options.
 | `--audio-mode` | `redirect` to RDP, `mirror` local playback, or `off` | `redirect` |
 | `--keyboard-layout-policy` | `client` layout or existing `compositor` keymap | `client` |
 | `--config` | Config file path | `~/.config/hypr-rdp/config.toml` |
+| `--check-config` | Validate existing config/auth/TLS and exit before desktop access | off |
 | `--file-transfer-mode` | `both`, `to-client`, `to-server`, or `off`; directions are relative to the RDP client | `both` |
 | `--file-transfer-max-entries` | Selection entry budget, including skipped entries; maximum `100000` | `10000` |
 | `--file-transfer-max-chunk-bytes` | Maximum bytes per read request | `8388608` |

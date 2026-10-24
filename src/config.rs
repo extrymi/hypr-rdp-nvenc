@@ -83,7 +83,7 @@ struct Args {
     #[arg(long)]
     key: Option<String>,
 
-    /// Authentication mode: configured credentials or Linux PAM
+    /// Authentication mode: configured credentials, Linux PAM, or explicit none
     #[arg(long)]
     auth_mode: Option<String>,
 
@@ -183,9 +183,14 @@ struct Args {
     /// Path to config file [default: ~/.config/hypr-rdp/config.toml]
     #[arg(long)]
     config: Option<String>,
+
+    /// Validate existing config/auth/TLS without connecting to the desktop or listening
+    #[arg(long)]
+    check_config: bool,
 }
 
 #[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 struct ConfigFile {
     auth_mode: Option<String>,
     pam_service: Option<String>,
@@ -250,10 +255,20 @@ impl ConfigFile {
                 Ok(config)
             }
             Err(error) => {
+                // TOML's Display includes the source line, which may contain a
+                // password. Report location/category without echoing contents.
+                let offset = error.span().map_or(0, |span| span.start);
+                let prefix = content.get(..offset).unwrap_or_default();
+                let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
+                let column = prefix.rsplit('\n').next().unwrap_or_default().chars().count() + 1;
+                let category = if error.message().starts_with("unknown field") {
+                    "unknown configuration field"
+                } else {
+                    "invalid TOML or value type"
+                };
                 anyhow::bail!(
-                    "failed to parse config {}: {}",
+                    "failed to parse config {} at line {line}, column {column}: {category}",
                     config_path.display(),
-                    error
                 );
             }
         }
@@ -261,6 +276,7 @@ impl ConfigFile {
 }
 
 pub struct RuntimeConfig {
+    pub check_config: bool,
     pub bind: SocketAddr,
     pub cert: Option<String>,
     pub key: Option<String>,
@@ -313,9 +329,26 @@ fn resolve_authentication(args: &mut Args, config: &mut ConfigFile) -> anyhow::R
                 config.password.take(),
                 config.password_file.take(),
             )?;
+            anyhow::ensure!(
+                !username.is_empty() && !password.is_empty(),
+                "auth-mode configured requires a nonempty username and password/password-file; use auth-mode none only for deliberate unauthenticated access"
+            );
             Ok(AuthConfig::Configured(ConfigCredentials::from_parts(
                 username, password,
             )))
+        }
+        "none" => {
+            anyhow::ensure!(
+                service.is_none()
+                    && args.username.is_none()
+                    && config.username.is_none()
+                    && args.password.is_none()
+                    && config.password.is_none()
+                    && args.password_file.is_none()
+                    && config.password_file.is_none(),
+                "auth-mode none cannot be combined with credentials or pam-service"
+            );
+            Ok(AuthConfig::Configured(None))
         }
         "pam" => {
             anyhow::ensure!(
@@ -334,7 +367,7 @@ fn resolve_authentication(args: &mut Args, config: &mut ConfigFile) -> anyhow::R
             );
             Ok(AuthConfig::Pam { service })
         }
-        _ => anyhow::bail!("unknown auth-mode; expected configured or pam"),
+        _ => anyhow::bail!("unknown auth-mode; expected configured, pam, or none"),
     }
 }
 
@@ -482,6 +515,7 @@ impl RuntimeConfig {
         validate_file_transfer_max_entries(file_transfer_max_entries)?;
 
         Ok(Self {
+            check_config: args.check_config,
             bind,
             cert,
             key,
@@ -1414,9 +1448,10 @@ mod pam_config_tests {
     }
 
     #[test]
-    fn pam_is_explicit_and_configured_credentials_remain_the_default() {
+    fn missing_credentials_fail_and_unauthenticated_mode_is_explicit() {
+        assert!(resolve(&["hypr-rdp"], "").is_err());
         assert_eq!(
-            resolve(&["hypr-rdp"], "").unwrap(),
+            resolve(&["hypr-rdp", "--auth-mode", "none"], "").unwrap(),
             AuthConfig::Configured(None)
         );
         assert_eq!(
@@ -1488,5 +1523,33 @@ mod pam_config_tests {
                 password: "cli".into()
             }))
         );
+    }
+
+    #[test]
+    fn incomplete_credentials_never_turn_into_anonymous_access() {
+        for file in ["username = 'user'", "password = 'secret'", "username = ''\npassword = ''", "username = 'user'\npassword = ''"] {
+            assert!(resolve(&["hypr-rdp"], file).is_err());
+        }
+        for field in ["username", "password", "password_file", "pam_service"] {
+            assert!(resolve(&["hypr-rdp", "--auth-mode", "none"], &format!("{field} = ''")).is_err());
+        }
+    }
+
+    #[test]
+    fn unknown_keys_and_parse_errors_report_location_without_secrets() {
+        for (name, text, category) in [
+            ("unknown-secret", "pasword = 'CANARY-SECRET'", "unknown configuration field"),
+            ("syntax-secret", "password = 'CANARY-SECRET' invalid", "invalid TOML"),
+            ("type-secret", "password = ['CANARY-SECRET']", "invalid TOML"),
+        ] {
+            let path = std::env::temp_dir().join(format!("hypr-rdp-{name}-{}.toml", std::process::id()));
+            std::fs::write(&path, text).unwrap();
+            let error = ConfigFile::load(Some(path.to_str().unwrap())).unwrap_err();
+            let message = format!("{error:#}");
+            assert!(message.contains(category), "{message}");
+            assert!(message.contains("line 1"), "{message}");
+            assert!(!message.contains("CANARY-SECRET"), "{message}");
+            std::fs::remove_file(path).unwrap();
+        }
     }
 }

@@ -1,12 +1,11 @@
 use std::net::SocketAddr;
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use ironrdp_server::{
     ConnectionHandler, ConnectionInfo, PostConnectionAction, RdpServer, ServerError,
-    SoundServerFactory, TlsIdentityCtx,
+    SoundServerFactory,
 };
 
 use crate::audio::{AudioMode, HyprSoundFactory};
@@ -34,14 +33,43 @@ pub struct ServerContext {
     pub display_handle: HyprDisplayHandle,
 }
 
+fn prepare_security(
+    authentication: crate::config::AuthConfig,
+    cert: Option<&str>,
+    key: Option<&str>,
+    provisioning: tls::Provisioning,
+) -> Result<(PreparedAuthentication, tls::PreparedTls)> {
+    let authentication = PreparedAuthentication::new(authentication)?;
+    let tls = tls::prepare(cert, key, provisioning)?;
+    Ok((authentication, tls))
+}
+
+/// Offline preflight: no compositor discovery, capture, input, listener or hooks.
+pub fn check_config(config: RuntimeConfig) -> Result<()> {
+    prepare_security(
+        config.authentication,
+        config.cert.as_deref(),
+        config.key.as_deref(),
+        tls::Provisioning::ExistingOnly,
+    )?;
+    Ok(())
+}
+
 pub async fn setup(config: RuntimeConfig) -> Result<ServerContext> {
-    let authentication = PreparedAuthentication::new(config.authentication)?;
+    // Every fallible auth/TLS prerequisite precedes any compositor access.
+    let (authentication, tls) = prepare_security(
+        config.authentication,
+        config.cert.as_deref(),
+        config.key.as_deref(),
+        tls::Provisioning::CreateIfAbsent,
+    )?;
     let hyprland_instance =
         crate::hyprland::initialize().context("failed to select the Hyprland instance")?;
     let RuntimeConfig {
+        check_config: _,
         bind,
-        cert,
-        key,
+        cert: _,
+        key: _,
         authentication: _,
         resolution,
         headless_scale,
@@ -107,18 +135,10 @@ pub async fn setup(config: RuntimeConfig) -> Result<ServerContext> {
 
     let builder = RdpServer::builder().with_addr(bind);
 
-    let (cert_path, key_path) = tls::resolve_tls_paths(cert.as_deref(), key.as_deref())?;
-
-    let tls_ctx = TlsIdentityCtx::init_from_paths(Path::new(&cert_path), Path::new(&key_path))
-        .context("failed to load TLS certificates")?;
-    let acceptor = tls_ctx
-        .make_acceptor()
-        .context("failed to create TLS acceptor")?;
-
     let security_mode = authentication.security;
     let secured_builder = match security_mode {
-        ServerSecurityMode::Tls => builder.with_tls(acceptor),
-        ServerSecurityMode::Hybrid => builder.with_hybrid(acceptor, tls_ctx.pub_key),
+        ServerSecurityMode::Tls => builder.with_tls(tls.acceptor),
+        ServerSecurityMode::Hybrid => builder.with_hybrid(tls.acceptor, tls.pub_key),
     };
 
     let mut server = secured_builder

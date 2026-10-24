@@ -11,8 +11,8 @@
     "target": "x86_64-unknown-linux-gnu"
   },
   "ironrdp_revision": "3db08ba86983ce35c9d36ad33f59ceb4b607dce8",
-  "cargo_lock_sha256": "a4c758d118de4e12d8e0f5470e1689cdbc743de85b99ad9bae2d82fb728dde27",
-  "cargo_toml_sha256": "a3ba10086c87477cffd76fd5b31180346e2a1d859a745c5f52554ccf4fb9a0bd",
+  "cargo_lock_sha256": "ec720d7d884a66f6ba67c3af2909f457f81e5d93dd9cf3bae6b57492e6400490",
+  "cargo_toml_sha256": "c9108c0fda89997246e274fe461661b4c1567f655c1deb70a4fa72b280d9ca7c",
   "locked_packages": 484,
   "runner": "ubuntu-24.04",
   "actions": {
