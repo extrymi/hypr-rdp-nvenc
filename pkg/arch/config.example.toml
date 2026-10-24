@@ -1,0 +1,26 @@
+# Copy to ~/.config/hypr-rdp/config.toml, mode 0600, and replace all placeholders.
+# Loopback is an initial default. Set bind explicitly for remote access.
+bind = "127.0.0.1:3389"
+auth_mode = "configured"
+username = "REPLACE_WITH_RDP_USERNAME"
+password_file = "/home/REPLACE_WITH_DESKTOP_USER/.config/hypr-rdp/password"
+
+# Capture an EXISTING output; obtain its name with hyprctl monitors.
+# Omitting output would create a separate headless output instead.
+output = "REPLACE_WITH_EXISTING_OUTPUT"
+keyboard_layout_policy = "compositor"
+audio_mode = "mirror"
+
+h264_backend = "nvenc"
+nvenc_device = "GPU-00000000-0000-0000-0000-000000000000" # replace with actual full UUID
+egfx_codec = "avc420"
+rate_control = "cbr"
+bitrate = 10000000
+fps = 30
+# Do not set quality for NVENC. For software, remove nvenc_device and use vbr.
+
+# TLS defaults: ~/.config/hypr-rdp/{cert,key}.pem, provisioned before service start.
+# Alternatively supply BOTH explicit absolute paths:
+# cert = "/absolute/path/server-chain.pem"
+# key = "/absolute/path/server-key.pem"
+# PAM is opt-in: auth_mode="pam", remove username/password_file; see package doc.

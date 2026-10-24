@@ -1,0 +1,25 @@
+[Unit]
+Description=RDP access to the existing Hyprland session (experimental NVENC fork)
+Documentation=file:/usr/share/doc/hypr-rdp-nvenc/arch-package.md
+PartOf=graphical-session.target
+After=graphical-session.target
+ConditionEnvironment=WAYLAND_DISPLAY
+ConditionEnvironment=HYPRLAND_INSTANCE_SIGNATURE
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=exec
+UMask=0077
+UnsetEnvironment=SSLKEYLOGFILE
+# Exit 1..254 skips startup without retries: bad config/TLS is an operator task.
+ExecCondition=/usr/bin/hypr-rdp --check-config --config %h/.config/hypr-rdp/config.toml
+ExecStart=/usr/bin/hypr-rdp --config %h/.config/hypr-rdp/config.toml
+Restart=on-failure
+RestartSec=5
+KillMode=mixed
+TimeoutStartSec=15
+TimeoutStopSec=30
+
+[Install]
+WantedBy=graphical-session.target

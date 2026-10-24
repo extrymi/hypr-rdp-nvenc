@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Explicit, user-invoked provisioning only. Package transactions never run this.
+set -euo pipefail
+umask 077
+export LC_ALL=C
+unset SSLKEYLOGFILE
+
+usage() {
+    echo 'Usage: hypr-rdp-tls [--directory ABSOLUTE_PATH] --dns NAME|--ip ADDRESS [...]'
+    echo 'Creates a new self-signed server identity; refuses any existing cert/key.'
+}
+fail() { echo "hypr-rdp-tls: $*" >&2; exit 1; }
+directory="${HOME:?HOME must be set}/.config/hypr-rdp"
+san=()
+while (($#)); do
+    case "$1" in
+        --help) usage; exit 0 ;;
+        --directory) (($# >= 2)) || fail 'missing directory'; directory=$2; shift 2 ;;
+        --dns)
+            (($# >= 2)) || fail 'missing DNS name'
+            [[ $2 =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]] || fail 'invalid DNS name'
+            ((${#2} <= 253)) || fail 'DNS name too long'
+            IFS=. read -r -a labels <<< "$2"
+            for label in "${labels[@]}"; do
+                [[ $label =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]] &&
+                    ((${#label} <= 63)) || fail 'invalid DNS label'
+            done
+            san+=("DNS:$2"); shift 2 ;;
+        --ip)
+            (($# >= 2)) || fail 'missing IP address'
+            [[ $2 =~ ^[0-9A-Fa-f:.]+$ ]] || fail 'invalid IP address'
+            san+=("IP:$2"); shift 2 ;;
+        *) usage >&2; fail 'unknown argument' ;;
+    esac
+done
+((${#san[@]})) || fail 'supply at least one --dns or --ip matching the client connection address'
+[[ $directory == /* ]] || fail 'directory must be absolute'
+[[ ! -L $directory ]] || fail 'directory must not be a symlink'
+mkdir -p -- "$directory"
+[[ -d $directory && -O $directory && $(stat -c %a -- "$directory") == 700 ]] ||
+    fail 'directory must be owned by this user and have mode 0700'
+cd -- "$directory"
+for path in cert.pem key.pem; do
+    [[ ! -e $path && ! -L $path ]] || fail 'saved or partial identity exists; restore it explicitly, do not overwrite it'
+done
+# Share the server's provisioning lock. The private directory excludes other UIDs.
+[[ ! -L .tls.lock && (! -e .tls.lock || -f .tls.lock) ]] || fail 'invalid provisioning lock'
+exec {identity_lock}<>.tls.lock
+flock --exclusive --nonblock "$identity_lock" || fail 'identity provisioning is busy'
+for path in cert.pem key.pem; do
+    [[ ! -e $path && ! -L $path ]] || fail 'saved or partial identity exists'
+done
+staging=$(mktemp -d -- .tls-stage.XXXXXXXX)
+trap 'rm -rf -- "$staging"' EXIT
+san_value=$(IFS=,; echo "${san[*]}")
+openssl req -new -x509 -newkey rsa:2048 -nodes -sha256 -days 365 \
+    -subj /CN=hypr-rdp \
+    -addext "subjectAltName=$san_value" \
+    -addext 'basicConstraints=critical,CA:FALSE' \
+    -addext 'keyUsage=critical,digitalSignature,keyEncipherment' \
+    -addext 'extendedKeyUsage=serverAuth' \
+    -keyout "$staging/key.pem" -out "$staging/cert.pem" 2>"$staging/openssl.log" ||
+    fail 'certificate generation failed (check the supplied DNS/IP values)'
+chmod 600 "$staging/key.pem"
+chmod 644 "$staging/cert.pem"
+# Neither link may replace an existing directory entry. A crash between them
+# leaves a partial identity that the server refuses; no identity rotation occurs.
+ln -T -- "$staging/key.pem" key.pem
+ln -T -- "$staging/cert.pem" cert.pem
+openssl x509 -in cert.pem -noout -sha256 -fingerprint -dates -ext subjectAltName
+echo "Created identity in $directory. Transfer only cert.pem to clients."
