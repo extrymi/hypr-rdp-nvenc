@@ -8,7 +8,9 @@ Development fork: NVIDIA support is under construction. The current changes are
 documented in [NVENC development](docs/nvenc-development.md) and
 [startup validation](docs/startup-validation.md). CPU CI artifacts are not a
 deployment release or a qualified NVIDIA build. Installation examples below
-describe upstream; the fork's Arch package is a later stage.
+describe upstream. The experimental fork package, explicit setup and removal are
+documented in [Arch package](pkg/arch/arch-package.md); real hardware/client
+qualification remains open.
 
 Native RDP server for Hyprland.
 

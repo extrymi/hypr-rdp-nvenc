@@ -1,0 +1,133 @@
+name: Arch package lifecycle
+
+on:
+  pull_request:
+    branches: [codex/nvenc-server-integration, codex/arch-packaging, main]
+    paths:
+      - 'pkg/arch/**'
+      - 'scripts/ci/arch/**'
+      - 'scripts/ci/arch-*.sh'
+      - 'scripts/ci/verify-arch.py'
+      - 'ci/arch.json'
+      - '.github/workflows/arch-package.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arch-package-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  arch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout packaging source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify pins and package inputs
+        run: |
+          mkdir -p artifacts
+          python3 scripts/ci/verify-baseline.py
+          python3 scripts/ci/verify-nvenc-headers.py
+          python3 scripts/ci/verify-arch.py
+          bash -n pkg/arch/PKGBUILD pkg/arch/hypr-rdp-tls scripts/ci/arch-build.sh scripts/ci/arch-runtime-setup.sh
+          python3 - <<'PY'
+          import json, os
+          pins = json.load(open('ci/arch.json'))
+          with open(os.environ['GITHUB_ENV'], 'a') as out:
+              out.write(f"ARCH_IMAGE={pins['image']}\nARCH_RUNTIME_IMAGE={pins['runtime_image']}\nARCH_SNAPSHOT={pins['snapshot']}\n")
+          PY
+
+      - name: Restore checked package build for identical inputs
+        id: arch-cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: artifacts/
+          key: arch-package-v1-${{ hashFiles('pkg/arch/**', 'ci/arch.json', 'ci/baseline.json', 'rust-toolchain.toml', 'scripts/ci/arch-build.sh', 'scripts/ci/arch/pam-probe.c') }}
+
+      - name: Build and check the real Arch package
+        if: steps.arch-cache.outputs.cache-hit != 'true'
+        run: |
+          set -o pipefail
+          docker pull "$ARCH_IMAGE"
+          docker image inspect "$ARCH_IMAGE" > artifacts/arch-image.json
+          docker run --name hypr-arch-build \
+            -e GITHUB_RUN_ID -e GITHUB_SHA \
+            -e ARCH_SNAPSHOT -e CARGO_BUILD_JOBS=2 -e CARGO_INCREMENTAL=0 \
+            -e RUST_TEST_THREADS=2 -e PROPTEST_CASES=512 \
+            -v "$PWD:/source:ro" -v "$PWD/artifacts:/out:rw" \
+            "$ARCH_IMAGE" bash /source/scripts/ci/arch-build.sh 2>&1 | tee artifacts/arch-build.log
+
+      - name: Verify checked build output hashes
+        run: cd artifacts && sha256sum --check ARCH-BUILD-SHA256SUMS
+
+      - name: Save checked package before lifecycle testing
+        if: steps.arch-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: artifacts/
+          key: ${{ steps.arch-cache.outputs.cache-primary-key }}
+
+      - name: Prepare a fresh Arch runtime root
+        run: |
+          set -o pipefail
+          docker pull "$ARCH_RUNTIME_IMAGE"
+          docker image inspect "$ARCH_RUNTIME_IMAGE" > artifacts/arch-runtime-image.json
+          docker run --name hypr-arch-runtime-setup -e ARCH_SNAPSHOT \
+            -v "$PWD:/source:ro" -v "$PWD/artifacts:/out:rw" \
+            "$ARCH_RUNTIME_IMAGE" bash /source/scripts/ci/arch-runtime-setup.sh 2>&1 | tee artifacts/arch-runtime-setup.log
+          docker commit hypr-arch-runtime-setup hypr-arch-runtime:ci
+
+      - name: Boot systemd and exercise package lifecycle
+        run: |
+          set -o pipefail
+          # Privilege is confined to this disposable GitHub runner. No NVIDIA
+          # devices, credentials, Docker socket or workstation filesystem mount.
+          docker run -d --name hypr-arch-runtime --privileged --cgroupns=private \
+            --tmpfs /run --tmpfs /run/lock \
+            -e container=docker -e SYSTEMD_LOG_TARGET=console -e SYSTEMD_LOG_LEVEL=info \
+            -v "$PWD/artifacts:/out:rw" hypr-arch-runtime:ci /sbin/init --log-target=console
+          ready=false
+          for attempt in {1..30}; do
+            if [[ $(docker inspect --format '{{.State.Running}}' hypr-arch-runtime) != true ]]; then break; fi
+            if docker exec hypr-arch-runtime test -S /run/dbus/system_bus_socket; then ready=true; break; fi
+            sleep 1
+          done
+          if [[ $ready != true ]]; then
+            docker inspect hypr-arch-runtime
+            docker logs hypr-arch-runtime
+            exit 1
+          fi
+          docker exec hypr-arch-runtime python3 /root/hypr-rdp-lifecycle.py 2>&1 | tee artifacts/arch-lifecycle.log
+
+      - name: Preserve evidence and clean up containers
+        if: always()
+        run: |
+          docker logs hypr-arch-runtime > artifacts/arch-systemd.log 2>&1 || true
+          docker exec hypr-arch-runtime journalctl -b --no-pager > artifacts/arch-journal.log 2>&1 || true
+          docker rm -f hypr-arch-build hypr-arch-runtime-setup hypr-arch-runtime || true
+          sudo chown -R "$(id -u):$(id -g)" artifacts
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+          root = Path('artifacts')
+          lines = [f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}' for p in sorted(root.iterdir()) if p.is_file() and p.name != 'SHA256SUMS']
+          (root / 'SHA256SUMS').write_text('\n'.join(lines) + '\n')
+          PY
+
+      - name: Upload package and lifecycle evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: arch-package-${{ github.sha }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
