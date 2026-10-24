@@ -8,6 +8,9 @@ The library is an internal implementation boundary, not a stable external API.
 | `src/nvenc/types.rs` | Validated device/configuration, frame identity, typed faults |
 | `src/nvenc/policy.rs` | Pure backend selection/fallback rules |
 | `src/nvenc/engine.rs` | Driver ownership, accepted-input semantics, resource lifecycle |
+| `src/nvenc/native/` | Optional generated ABI, dynamic loader and same-thread native Driver |
+| `src/nvenc/annexb.rs` | Bounded H.264 framing, parameter cache and IDR validation |
+| `tests/native/fake_driver.c` | Independent CPU C API fixture; no real GPU calls |
 | `src/nvenc/protocol.rs` | Bounded versioned packets, strict decoding |
 | `src/nvenc/lease.rs` | Private device lock and restart-safe process reconciliation |
 | `src/nvenc/supervisor.rs` | Parent deadlines, process termination, worker loop |
@@ -27,8 +30,9 @@ The full workflow also runs the original binary tests under default, software
 and software+clipboard features and performs a release build. No Rust/CUDA
 installation or test run on the working desktop is required by this stage.
 
-Next implement the native Driver with generated ABI checks and mocked foreign
-calls. Then connect the same-executable hidden worker entry point, configuration
+The native Driver is implemented behind the optional `nvenc` feature; see
+[native adapter](native-nvenc.md) for its ABI checks, CPU tests and limitations.
+Next connect the same-executable hidden worker entry point, configuration
 and EGFX policy. Do not expose `nvenc` as a working server option before those
 paths and strict failure propagation exist. Existing authorization/TLS remain
 in the server; configuration error handling is a separate, narrowly scoped patch.

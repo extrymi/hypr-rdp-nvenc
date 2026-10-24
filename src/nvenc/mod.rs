@@ -1,7 +1,8 @@
 //! NVENC lifecycle, private worker transport and failure policy.
 //!
 //! Native driver calls belong exclusively in the worker. No implementation of
-//! [`Driver`] that accesses a GPU is supplied in this stage. See ADR 0001.
+//! [`Driver`] is instantiated in the server. The optional `nvenc` feature adds
+//! a lazy native adapter for worker use only. See ADR 0001 and native-nvenc.md.
 
 mod engine;
 mod lease;
@@ -9,6 +10,11 @@ mod policy;
 mod protocol;
 mod supervisor;
 mod types;
+
+#[cfg(feature = "nvenc")]
+mod annexb;
+#[cfg(feature = "nvenc")]
+pub mod native;
 
 pub use engine::{Driver, Engine, Submission};
 pub use lease::DeviceLease;

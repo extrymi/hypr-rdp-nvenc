@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main, codex/cpu-baseline, codex/nvenc-lifecycle]
+    branches: [main, codex/cpu-baseline, codex/nvenc-lifecycle, codex/startup-validation]
 
 permissions:
   contents: read
@@ -37,6 +37,7 @@ jobs:
         run: |
           mkdir -p artifacts
           python3 scripts/ci/verify-baseline.py | tee artifacts/baseline-verification.log
+          python3 scripts/ci/verify-nvenc-headers.py | tee artifacts/nvenc-headers.log
 
       - name: Install dependencies on disposable runner
         run: |
@@ -69,6 +70,11 @@ jobs:
       - name: Clippy all targets and existing features
         run: cargo clippy --frozen --all-targets --all-features -- -D warnings 2>&1 | tee artifacts/clippy.log
 
+      - name: Test generated native ABI and independent CPU driver API
+        run: |
+          cargo test --frozen --features nvenc --lib 2>&1 | tee artifacts/test-native.log
+          cargo test --frozen --no-default-features --features nvenc --lib 2>&1 | tee artifacts/test-native-software.log
+
       - name: Test NVENC lifecycle with concurrent process creation
         run: |
           cargo test --frozen --lib 2>&1 | tee artifacts/test-nvenc-core.log
@@ -97,7 +103,13 @@ jobs:
           cargo test --frozen --no-default-features --features client-to-server inbound_real_mount_copy_bytes -- --ignored --test-threads=1 2>&1 | tee artifacts/test-fuse.log
 
       - name: Build frozen release baseline
-        run: cargo build --frozen --release 2>&1 | tee artifacts/build-release.log
+        run: |
+          cargo build --frozen --release --features nvenc 2>&1 | tee artifacts/build-release.log
+          nm target/release/hypr-rdp > artifacts/release-symbols.txt
+          if grep 'hypr_mock_' artifacts/release-symbols.txt; then
+            echo "CPU test driver fixture linked into production executable"
+            exit 1
+          fi
 
       - name: Package baseline evidence
         run: bash scripts/ci/create-artifact.sh

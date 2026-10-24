@@ -2,6 +2,10 @@
 
 Status: accepted for implementation, 2026-10-24. Hardware qualification remains open.
 
+This ADR originally records the lifecycle-only stage. The optional native
+implementation is now documented in [native-nvenc.md](../native-nvenc.md);
+runtime capture/EGFX integration and hardware qualification remain separate.
+
 ## Decision and alternatives
 
 Implement one native CUDA-driver/NVENC adapter, loaded dynamically inside an
