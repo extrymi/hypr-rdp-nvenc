@@ -20,6 +20,8 @@ fn native_bindings() {
         .header(wrapper)
         .clang_arg("-Ivendor/nv-codec-headers")
         .allowlist_type("NV_.*|GUID|HYPR_.*")
+        .allowlist_function("hypr_nvenc_.*")
+        .blocklist_var("NV_ENC_.*GUID")
         .allowlist_var("NV_.*|NVENCAPI_.*|HYPR_.*|CUDA_SUCCESS|CU_CTX_SCHED_BLOCKING_SYNC")
         .prepend_enum_name(false)
         .derive_default(true)

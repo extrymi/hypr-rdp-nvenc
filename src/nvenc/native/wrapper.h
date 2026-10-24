@@ -18,6 +18,11 @@ HYPR_VERSION(NV_ENC_LOCK_INPUT_BUFFER_VER);
 HYPR_VERSION(NV_ENC_PIC_PARAMS_VER);
 HYPR_VERSION(NV_ENC_LOCK_BITSTREAM_VER);
 static const uint32_t HYPR_MIN_API = (NVENCAPI_MAJOR_VERSION << 4) | NVENCAPI_MINOR_VERSION;
+/* C owns aggregate GUID initializers; bindgen must not emit undefined extern
+ * references to header-local static constants. Return typed values instead. */
+GUID hypr_nvenc_h264(void);
+GUID hypr_nvenc_profile(void);
+GUID hypr_nvenc_preset(void);
 
 typedef NVENCSTATUS (NVENCAPI *HYPR_GET_MAX_VERSION)(uint32_t *);
 typedef NVENCSTATUS (NVENCAPI *HYPR_CREATE_INSTANCE)(NV_ENCODE_API_FUNCTION_LIST *);

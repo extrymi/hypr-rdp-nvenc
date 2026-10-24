@@ -1,5 +1,6 @@
 //! Native ABI boundary. Called only in the private, supervised worker process.
 mod driver;
+mod guids;
 mod loader;
 
 // These bindings are generated from the pinned third-party C headers. Their
@@ -9,6 +10,7 @@ mod loader;
     non_snake_case,
     non_upper_case_globals,
     dead_code,
+    unused_imports,
     clippy::all
 )]
 mod ffi {

@@ -1,6 +1,6 @@
 use std::{ffi::c_void, marker::PhantomData, ptr, rc::Rc};
 
-use super::{ffi::*, loader::Api};
+use super::{ffi::*, guids, loader::Api};
 use crate::nvenc::{
     annexb::AnnexB, AccessUnit, Config, Driver, Error, Fault, Frame, Phase, Stamp, Submission,
     BUFFER_COUNT, MAX_OUTPUT_BYTES,
@@ -99,7 +99,7 @@ impl NativeDriver {
             unsafe {
                 self.api().enc.nvEncGetEncodeCaps.unwrap()(
                     self.session,
-                    NV_ENC_CODEC_H264_GUID,
+                    guids::h264(),
                     &mut params,
                     &mut value,
                 )
@@ -136,14 +136,14 @@ impl NativeDriver {
             if count > capacity
                 || !guids[..count as usize]
                     .iter()
-                    .any(|g| same_guid(*g, NV_ENC_CODEC_H264_GUID))
+                    .any(|g| same_guid(*g, guids::h264()))
             {
                 return Err(unsupported());
             }
             nv(
                 self.api().enc.nvEncGetEncodeProfileGUIDCount.unwrap()(
                     self.session,
-                    NV_ENC_CODEC_H264_GUID,
+                    guids::h264(),
                     &mut count,
                 ),
                 Phase::Probe,
@@ -155,7 +155,7 @@ impl NativeDriver {
             nv(
                 self.api().enc.nvEncGetEncodeProfileGUIDs.unwrap()(
                     self.session,
-                    NV_ENC_CODEC_H264_GUID,
+                    guids::h264(),
                     guids.as_mut_ptr(),
                     capacity,
                     &mut count,
@@ -165,14 +165,14 @@ impl NativeDriver {
             if count > capacity
                 || !guids[..count as usize]
                     .iter()
-                    .any(|g| same_guid(*g, NV_ENC_H264_PROFILE_HIGH_GUID))
+                    .any(|g| same_guid(*g, guids::profile()))
             {
                 return Err(unsupported());
             }
             nv(
                 self.api().enc.nvEncGetEncodePresetCount.unwrap()(
                     self.session,
-                    NV_ENC_CODEC_H264_GUID,
+                    guids::h264(),
                     &mut count,
                 ),
                 Phase::Probe,
@@ -184,7 +184,7 @@ impl NativeDriver {
             nv(
                 self.api().enc.nvEncGetEncodePresetGUIDs.unwrap()(
                     self.session,
-                    NV_ENC_CODEC_H264_GUID,
+                    guids::h264(),
                     guids.as_mut_ptr(),
                     capacity,
                     &mut count,
@@ -194,7 +194,7 @@ impl NativeDriver {
             if count > capacity
                 || !guids[..count as usize]
                     .iter()
-                    .any(|g| same_guid(*g, NV_ENC_PRESET_P1_GUID))
+                    .any(|g| same_guid(*g, guids::preset()))
             {
                 return Err(unsupported());
             }
@@ -202,7 +202,7 @@ impl NativeDriver {
             nv(
                 self.api().enc.nvEncGetInputFormatCount.unwrap()(
                     self.session,
-                    NV_ENC_CODEC_H264_GUID,
+                    guids::h264(),
                     &mut count,
                 ),
                 Phase::Probe,
@@ -214,7 +214,7 @@ impl NativeDriver {
             nv(
                 self.api().enc.nvEncGetInputFormats.unwrap()(
                     self.session,
-                    NV_ENC_CODEC_H264_GUID,
+                    guids::h264(),
                     formats.as_mut_ptr(),
                     capacity,
                     &mut count,
@@ -359,8 +359,8 @@ impl Driver for NativeDriver {
             unsafe {
                 self.api().enc.nvEncGetEncodePresetConfigEx.unwrap()(
                     self.session,
-                    NV_ENC_CODEC_H264_GUID,
-                    NV_ENC_PRESET_P1_GUID,
+                    guids::h264(),
+                    guids::preset(),
                     NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY,
                     &mut preset,
                 )
@@ -369,7 +369,7 @@ impl Driver for NativeDriver {
         )?;
         let mut codec = preset.presetCfg;
         codec.version = HYPR_NV_ENC_CONFIG_VER;
-        codec.profileGUID = NV_ENC_H264_PROFILE_HIGH_GUID;
+        codec.profileGUID = guids::profile();
         codec.gopLength = config.fps * 2;
         codec.frameIntervalP = 1;
         codec.frameFieldMode = NV_ENC_PARAMS_FRAME_FIELD_MODE_FRAME;
@@ -411,8 +411,8 @@ impl Driver for NativeDriver {
         h264.h264VUIParameters.colourMatrix = 1;
         let mut params = NV_ENC_INITIALIZE_PARAMS {
             version: HYPR_NV_ENC_INITIALIZE_PARAMS_VER,
-            encodeGUID: NV_ENC_CODEC_H264_GUID,
-            presetGUID: NV_ENC_PRESET_P1_GUID,
+            encodeGUID: guids::h264(),
+            presetGUID: guids::preset(),
             encodeWidth: config.width,
             encodeHeight: config.height,
             darWidth: config.width,

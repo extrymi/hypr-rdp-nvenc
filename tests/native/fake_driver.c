@@ -143,7 +143,9 @@ static NVENCSTATUS NVENCAPI lock_input(void *s, NV_ENC_LOCK_INPUT_BUFFER *p) {
 }
 static NVENCSTATUS NVENCAPI unlock_input(void *s, NV_ENC_INPUT_PTR input) {
     (void)s; int fail = event("unlock-input"); Input *i = input;
-    if (!i->locked) return NV_ENC_ERR_INVALID_PARAM; i->locked = 0; return fail ? NV_ENC_ERR_GENERIC : NV_ENC_SUCCESS;
+    if (!i->locked) return NV_ENC_ERR_INVALID_PARAM;
+    i->locked = 0;
+    return fail ? NV_ENC_ERR_GENERIC : NV_ENC_SUCCESS;
 }
 static NVENCSTATUS NVENCAPI encode(void *s, NV_ENC_PIC_PARAMS *p) {
     (void)s;
@@ -175,7 +177,9 @@ static NVENCSTATUS NVENCAPI lock_output(void *s, NV_ENC_LOCK_BITSTREAM *p) {
 }
 static NVENCSTATUS NVENCAPI unlock_output(void *s, NV_ENC_OUTPUT_PTR output) {
     (void)s; int fail = event("unlock-output"); Output *o = output;
-    if (!o->locked) return NV_ENC_ERR_INVALID_PARAM; o->locked = 0; return fail ? NV_ENC_ERR_GENERIC : NV_ENC_SUCCESS;
+    if (!o->locked) return NV_ENC_ERR_INVALID_PARAM;
+    o->locked = 0;
+    return fail ? NV_ENC_ERR_GENERIC : NV_ENC_SUCCESS;
 }
 void hypr_mock_api(HYPR_CUDA_FUNCTIONS *cuda, NV_ENCODE_API_FUNCTION_LIST *enc) {
     memset(cuda, 0, sizeof(*cuda)); memset(enc, 0, sizeof(*enc));
