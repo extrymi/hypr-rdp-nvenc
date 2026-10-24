@@ -256,7 +256,7 @@ impl Drop for PamChild {
 
 /// Executable used for the private PAM helper process.
 pub(crate) fn helper_executable() -> std::io::Result<PathBuf> {
-    std::env::current_exe()
+    Ok(PathBuf::from(crate::SELF_EXECUTABLE))
 }
 
 async fn run_helper(
@@ -267,6 +267,8 @@ async fn run_helper(
 ) -> Result<ExitStatus> {
     anyhow::ensure!(payload.len() <= PAYLOAD_LIMIT, "PAM request exceeds limit");
     let child = Command::new(executable)
+        // Keep the PAM/syslog program name when self-executing /proc/self/exe.
+        .arg0("hypr-rdp")
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())

@@ -106,8 +106,8 @@ impl NvencEncoder {
 
 /// Private worker invocation of this server's own executable.
 pub(crate) fn worker_command() -> std::io::Result<tokio::process::Command> {
-    let mut command = tokio::process::Command::new(std::env::current_exe()?);
-    command.arg(nvenc::WORKER_ARGUMENT);
+    let mut command = tokio::process::Command::new(crate::SELF_EXECUTABLE);
+    command.arg0("hypr-rdp").arg(nvenc::WORKER_ARGUMENT);
     Ok(command)
 }
 

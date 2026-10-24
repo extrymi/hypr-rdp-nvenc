@@ -13,6 +13,11 @@ use tracing_subscriber::EnvFilter;
 
 const DEFAULT_LOG_FILTER: &str = "hypr_rdp=info,ironrdp_server=error";
 
+/// The running image for private self-exec (NVENC worker, PAM helper). After a
+/// package upgrade replaced the installed pathname, `current_exe()` names
+/// "<path> (deleted)" (proc_pid_exe(5)) or another build of the program.
+pub(crate) const SELF_EXECUTABLE: &str = "/proc/self/exe";
+
 fn main() -> Result<()> {
     if let Some(status) = hypr_rdp::nvenc::dispatch_worker() {
         std::process::exit(status);
