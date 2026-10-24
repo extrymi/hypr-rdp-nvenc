@@ -12,17 +12,18 @@ os.umask(mask)
 if (root / "fail-oracle").exists():
     raise SystemExit(1)
 child = subprocess.Popen(["sleep", "300"])
-(root / "oracle.json").write_text(json.dumps({
-    "pid": os.getpid(), "child": child.pid, "umask": mask,
-    "keylog_present": "SSLKEYLOGFILE" in os.environ,
-    "wayland": os.environ.get("WAYLAND_DISPLAY"),
-    "instance": os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"),
-}))
 
 def stop(_signal, _frame):
     child.terminate()
     child.wait(timeout=5)
     raise SystemExit(0)
 
-signal.signal(signal.SIGTERM, stop)
+signal.signal(signal.SIGTERM, signal.SIG_IGN if (root / "ignore-stop").exists() else stop)
+(root / "oracle.tmp").write_text(json.dumps({
+    "pid": os.getpid(), "child": child.pid, "umask": mask,
+    "keylog_present": "SSLKEYLOGFILE" in os.environ,
+    "wayland": os.environ.get("WAYLAND_DISPLAY"),
+    "instance": os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"),
+}))
+(root / "oracle.tmp").replace(root / "oracle.json")
 signal.pause()

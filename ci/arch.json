@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "image": "archlinux:base-devel@sha256:2acfa2683d458b7803b7aa4ee3c139d2ba6922cd84666fcb7496a3a02fcc4c83",
+  "runtime_image": "archlinux:base@sha256:dfb01267da058e5d08ffdc543bf484c9b404655b0bac1d0201d972bf950cdfd0",
   "image_tag_metadata": "https://hub.docker.com/v2/repositories/library/archlinux/tags/base-devel",
   "snapshot": "2026/10/23",
   "runtime_commit": "fd4b702b7e7454d98eda0d155a75c4b0c56c2092",

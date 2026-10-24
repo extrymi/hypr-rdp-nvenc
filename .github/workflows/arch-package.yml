@@ -43,7 +43,7 @@ jobs:
           import json, os
           pins = json.load(open('ci/arch.json'))
           with open(os.environ['GITHUB_ENV'], 'a') as out:
-              out.write(f"ARCH_IMAGE={pins['image']}\nARCH_SNAPSHOT={pins['snapshot']}\n")
+              out.write(f"ARCH_IMAGE={pins['image']}\nARCH_RUNTIME_IMAGE={pins['runtime_image']}\nARCH_SNAPSHOT={pins['snapshot']}\n")
           PY
 
       - name: Build and check the real Arch package
@@ -60,9 +60,11 @@ jobs:
       - name: Prepare a fresh Arch runtime root
         run: |
           set -o pipefail
+          docker pull "$ARCH_RUNTIME_IMAGE"
+          docker image inspect "$ARCH_RUNTIME_IMAGE" > artifacts/arch-runtime-image.json
           docker run --name hypr-arch-runtime-setup -e ARCH_SNAPSHOT \
             -v "$PWD:/source:ro" -v "$PWD/artifacts:/out:rw" \
-            "$ARCH_IMAGE" bash /source/scripts/ci/arch-runtime-setup.sh 2>&1 | tee artifacts/arch-runtime-setup.log
+            "$ARCH_RUNTIME_IMAGE" bash /source/scripts/ci/arch-runtime-setup.sh 2>&1 | tee artifacts/arch-runtime-setup.log
           docker commit hypr-arch-runtime-setup hypr-arch-runtime:ci
 
       - name: Boot systemd and exercise package lifecycle
