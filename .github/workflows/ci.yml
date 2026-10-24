@@ -72,6 +72,9 @@ jobs:
       - name: Test default features
         run: cargo test --frozen 2>&1 | tee artifacts/test-default.log
 
+      - name: Check dormant subprocess fixtures
+        run: cargo test --frozen --test nvenc_worker -- --ignored 2>&1 | tee artifacts/test-dormant-fixtures.log
+
       - name: Test software-only features
         run: cargo test --frozen --no-default-features 2>&1 | tee artifacts/test-software.log
 

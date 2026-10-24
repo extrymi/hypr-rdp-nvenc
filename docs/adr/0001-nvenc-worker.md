@@ -35,7 +35,8 @@ The worker owns those operations on one OS thread, including its current CUDA
 context. It has the same UID; it is not a privileged service.
 
 A private Unix socket pair at inherited fd3 carries versioned messages. The
-parent clears the child's environment and standard streams. The worker receives
+parent clears the child's environment and standard streams and adds one fixed
+internal worker marker. The worker receives
 device UUID, epoch, dimensions, rate settings and NV12 bytes; it receives no
 authentication password, TLS key, compositor pointers or GPU handles.
 
@@ -122,7 +123,8 @@ Subprocess fixtures exercise hangs at startup, probe, init, allocation, submit,
 output, drain, buffer release, destroy and process exit. They also exercise non-reading peers,
 partial/oversized replies, stale epochs, terminal failure after N frames, and
 repeated cleanup. Ignored `fixture_*` test entries are invoked explicitly by
-their parent integration tests. They must not be run directly outside that setup.
+their parent integration tests. Without the worker marker they return immediately;
+a separate CI step verifies that a direct ignored-fixture run cannot hang.
 
 Native loading, ABI, real device enumeration, valid bitstream/decode, desktop,
 Windows/Linux/macOS clients and GPU fault recovery remain separate gates.

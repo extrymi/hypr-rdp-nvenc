@@ -63,7 +63,8 @@ impl Worker {
     /// The production caller must pass the same package executable with its
     /// private worker argument. An injected Command also permits CPU fixtures
     /// to exercise actual subprocess hangs. No production entry point is wired
-    /// yet. The child gets no inherited environment, stdin, stdout or stderr.
+    /// yet. The child gets no inherited environment, stdin, stdout or stderr;
+    /// only a fixed internal worker marker is added to its fresh environment.
     pub async fn spawn(
         mut command: Command,
         lease: DeviceLease,
@@ -94,6 +95,7 @@ impl Worker {
         let descriptor = child_socket.as_raw_fd();
         command
             .env_clear()
+            .env("HYPR_RDP_NVENC_WORKER", "1")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())

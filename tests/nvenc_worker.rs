@@ -56,13 +56,21 @@ async fn start(name: &str, directory: &RuntimeDir, cfg: Config) -> Result<Worker
     Worker::spawn(command, directory.lease(), cfg, deadlines()).await
 }
 
+fn is_fixture_child() -> bool {
+    std::env::var("HYPR_RDP_NVENC_WORKER").as_deref() == Ok("1")
+}
+
 fn inherited_socket() -> UnixStream {
+    assert!(is_fixture_child());
     // SAFETY: only fixture_* child entries call this. Worker::spawn has placed
     // their private socket at WORKER_FD; this is its only owning Rust handle.
     unsafe { UnixStream::from_raw_fd(WORKER_FD) }
 }
 
 fn run(scenario: Scenario) {
+    if !is_fixture_child() {
+        return;
+    }
     let _ = serve(inherited_socket(), FakeDriver::new(scenario));
 }
 
@@ -89,7 +97,9 @@ fn fixture_fail_after() {
 #[test]
 #[ignore = "subprocess fixture"]
 fn fixture_startup() {
-    stall();
+    if is_fixture_child() {
+        stall();
+    }
 }
 #[test]
 #[ignore = "subprocess fixture"]
@@ -151,17 +161,22 @@ fn discard(socket: &mut UnixStream) {
     let mut bytes = vec![0; length];
     socket.read_exact(&mut bytes).unwrap();
 }
-fn raw_ready() -> UnixStream {
+fn raw_ready() -> Option<UnixStream> {
+    if !is_fixture_child() {
+        return None;
+    }
     let mut socket = inherited_socket();
     packet(&mut socket, b"HNV1\0");
     discard(&mut socket);
     packet(&mut socket, b"HNV1\x02");
-    socket
+    Some(socket)
 }
 #[test]
 #[ignore = "subprocess fixture"]
 fn fixture_stale() {
-    let mut socket = raw_ready();
+    let Some(mut socket) = raw_ready() else {
+        return;
+    };
     discard(&mut socket);
     let mut reply = b"HNV1\x04".to_vec();
     reply.extend_from_slice(&16_u64.to_le_bytes()); // old epoch
@@ -173,7 +188,9 @@ fn fixture_stale() {
 #[test]
 #[ignore = "subprocess fixture"]
 fn fixture_oversized() {
-    let mut socket = raw_ready();
+    let Some(mut socket) = raw_ready() else {
+        return;
+    };
     discard(&mut socket);
     socket.write_all(&u32::MAX.to_le_bytes()).unwrap();
     stall();
@@ -181,7 +198,9 @@ fn fixture_oversized() {
 #[test]
 #[ignore = "subprocess fixture"]
 fn fixture_partial() {
-    let mut socket = raw_ready();
+    let Some(mut socket) = raw_ready() else {
+        return;
+    };
     discard(&mut socket);
     socket.write_all(&30_u32.to_le_bytes()).unwrap();
     for byte in b"HNV1\x04" {
@@ -193,8 +212,9 @@ fn fixture_partial() {
 #[test]
 #[ignore = "subprocess fixture"]
 fn fixture_not_reading() {
-    let _socket = raw_ready();
-    stall();
+    if let Some(_socket) = raw_ready() {
+        stall();
+    }
 }
 
 #[tokio::test]
