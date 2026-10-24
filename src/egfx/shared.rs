@@ -325,7 +325,7 @@ impl EgfxShared {
     pub(in crate::egfx) fn release_unsent_frame(&self) {
         let _ = self
             .frames_in_flight
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1));
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1));
     }
 
     /// Record a frame the transport accepted after `reserve_frame_in_flight`.
