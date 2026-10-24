@@ -45,5 +45,5 @@
       ]
     }
   ],
-  "scope": "CPU build and upstream tests; no NVENC implementation, live desktop or hardware qualification"
+  "scope": "CPU development build and tests, including optional native NVENC ABI and mocked API/decode checks; no production NVENC integration, live desktop or hardware qualification"
 }
