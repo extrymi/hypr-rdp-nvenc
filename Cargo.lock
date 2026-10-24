@@ -1503,6 +1503,7 @@ dependencies = [
  "wayland-protocols-wlr",
  "wayland-scanner",
  "wayland-server",
+ "x509-cert",
  "xkbcommon",
  "yuv",
 ]

@@ -3,6 +3,12 @@
 This stage prepares reproducible source inputs and a disposable CPU CI build.
 It adds no NVENC code and does not install or launch the server on the workstation.
 
+This document records the original phase-1 baseline. Later stacked changes add
+the [NVENC lifecycle](nvenc-development.md) and
+[startup validation](startup-validation.md). Phase 3 makes the already locked
+x509-cert 0.3.0 a direct dependency and updates the two manifest hashes explicitly;
+the set of 484 packages and their versions/checksums stay unchanged.
+
 ## What is fixed
 
 - Upstream: `MuNeNiCK/hypr-rdp` at `730020b8795b6f6a57a69f441414a80d2a8505d5` (0.1.7).
@@ -29,7 +35,7 @@ The pull request to `main` runs formatting, Clippy, all upstream default/softwar
 
 A green run must include every required step. A skipped, cancelled, disabled or approval-pending run is not a passing baseline. If fork Actions are disabled, enable Actions in this repository and rerun this pull request's check; no merge is required to review the branch.
 
-The artifact includes test/build logs, environment and dependency provenance, ELF linkage, a checksum file and a tar archive preserving the binary mode. The archive is an upstream CPU baseline, not the NVENC implementation, an Arch package or a deployment release. GPU/NVENC, actual PAM/systemd/UFW, existing desktop, Windows/macOS, WOL and install/upgrade/purge gates remain open.
+The artifact includes test/build logs, environment and dependency provenance, ELF linkage, a checksum file and a tar archive preserving the binary mode. The archive is an upstream CPU baseline, not the NVENC implementation, an Arch package or a deployment release. GPU/NVENC, actual PAM/systemd, existing desktop, Windows/macOS, WOL and install/upgrade/purge gates remain open.
 
 For an already isolated environment with the dependencies installed:
 
