@@ -309,29 +309,37 @@ impl EgfxShared {
     }
 
     pub(in crate::egfx) fn record_frame_queued(&self, frame_id: u32) {
+        self.reserve_frame_in_flight();
+        self.commit_frame_queued(frame_id);
+    }
+
+    /// Charge the local window before the transport can see a frame: the
+    /// IronRDP task may process its FrameAcknowledge as soon as it is sent.
+    pub(in crate::egfx) fn reserve_frame_in_flight(&self) {
+        self.frames_in_flight.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// Release the reservation of a frame the transport never accepted. Nothing
+    /// else was recorded for it. Saturating: a concurrent clear/reset or a
+    /// suspended acknowledgement may already have emptied the window.
+    pub(in crate::egfx) fn release_unsent_frame(&self) {
+        let _ = self
+            .frames_in_flight
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1));
+    }
+
+    /// Record a frame the transport accepted after `reserve_frame_in_flight`.
+    pub(in crate::egfx) fn commit_frame_queued(&self, frame_id: u32) {
         self.last_queued_frame_id.store(frame_id, Ordering::Release);
-        let in_flight = self.frames_in_flight.fetch_add(1, Ordering::AcqRel) + 1;
         let total_queued = self.total_queued_frames.fetch_add(1, Ordering::AcqRel) + 1;
         tracing::trace!(
             frame_id,
-            in_flight,
+            in_flight = self.frames_in_flight(),
             total_queued,
             client_queue_depth = self.client_queue_depth(),
             ack_suspended = self.frame_ack_suspended(),
             "EGFX: frame queued"
         );
-    }
-
-    /// Undo `record_frame_queued` for a frame the transport never accepted.
-    /// Saturating: a concurrent clear/reset or suspend may already have zeroed
-    /// the window, and the frame can never be acknowledged.
-    pub(in crate::egfx) fn unrecord_unsent_frame(&self) {
-        let _ = self
-            .frames_in_flight
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1));
-        let _ = self
-            .total_queued_frames
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1));
     }
 
     pub(in crate::egfx) fn record_frame_ack(&self, frame_id: u32, queue_depth: u32) {
