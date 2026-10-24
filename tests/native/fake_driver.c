@@ -8,7 +8,7 @@ typedef struct { uint8_t *bytes; uint32_t pitch, height; int locked; } Input;
 typedef struct { uint64_t timestamp; uint32_t index; int idr, locked; } Output;
 static _Thread_local char trace[16384], fail_name[64];
 static _Thread_local unsigned fail_n, hits, calls;
-static _Thread_local int resources, selected, mode;
+static _Thread_local int resources, selected, mode, eos_seen;
 static _Thread_local uint8_t *packet;
 static _Thread_local uint32_t packet_size;
 
@@ -21,7 +21,7 @@ static int event(const char *name) {
 void hypr_mock_reset(int new_mode, const char *failure, unsigned nth) {
     free(packet); packet = NULL; packet_size = 0;
     trace[0] = 0; snprintf(fail_name, sizeof(fail_name), "%s", failure);
-    fail_n = nth; hits = 0; resources = 0; selected = -1; mode = new_mode; calls = 0;
+    fail_n = nth; hits = 0; resources = 0; selected = -1; mode = new_mode; calls = 0; eos_seen = 0;
 }
 const char *hypr_mock_trace(void) { return trace; }
 int hypr_mock_resources(void) { return resources; }
@@ -124,6 +124,7 @@ static NVENCSTATUS NVENCAPI create_input(void *s, NV_ENC_CREATE_INPUT_BUFFER *p)
 }
 static NVENCSTATUS NVENCAPI destroy_input(void *s, NV_ENC_INPUT_PTR input) {
     (void)s; int fail = event("destroy-input"); Input *i = input;
+    if (!eos_seen) event("destroy-before-eos");
     if (i->locked) event("destroy-locked-input");
     free(i->bytes); free(i); resources--; return fail ? NV_ENC_ERR_GENERIC : NV_ENC_SUCCESS;
 }
@@ -133,6 +134,7 @@ static NVENCSTATUS NVENCAPI create_output(void *s, NV_ENC_CREATE_BITSTREAM_BUFFE
 }
 static NVENCSTATUS NVENCAPI destroy_output(void *s, NV_ENC_OUTPUT_PTR output) {
     (void)s; int fail = event("destroy-output"); Output *o = output;
+    if (!eos_seen) event("destroy-before-eos");
     if (o->locked) event("destroy-locked-output");
     free(o); resources--; return fail ? NV_ENC_ERR_GENERIC : NV_ENC_SUCCESS;
 }
@@ -149,7 +151,7 @@ static NVENCSTATUS NVENCAPI unlock_input(void *s, NV_ENC_INPUT_PTR input) {
 }
 static NVENCSTATUS NVENCAPI encode(void *s, NV_ENC_PIC_PARAMS *p) {
     (void)s;
-    if (p->encodePicFlags & NV_ENC_PIC_FLAG_EOS) return event("eos") ? NV_ENC_ERR_GENERIC : NV_ENC_SUCCESS;
+    if (p->encodePicFlags & NV_ENC_PIC_FLAG_EOS) { eos_seen = 1; return event("eos") ? NV_ENC_ERR_GENERIC : NV_ENC_SUCCESS; }
     if (event("encode") || p->version != NV_ENC_PIC_PARAMS_VER || p->bufferFmt != NV_ENC_BUFFER_FORMAT_NV12
         || p->pictureStruct != NV_ENC_PIC_STRUCT_FRAME) return NV_ENC_ERR_GENERIC;
     Input *i = p->inputBuffer;

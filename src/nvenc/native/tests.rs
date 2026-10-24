@@ -71,6 +71,7 @@ impl Drop for Fixture {
         let remaining = unsafe { hypr_mock_resources() };
         if !std::thread::panicking() {
             assert_eq!(remaining, 0, "{}", self.trace());
+            assert!(!self.trace().contains("destroy-before-eos"), "{}", self.trace());
         }
         unsafe { hypr_mock_reset(0, c"".as_ptr(), 0) };
     }
@@ -289,12 +290,12 @@ fn delayed_input_is_not_resubmitted_or_locked_and_busy_retries_are_bounded() {
 fn encode_errors_are_terminal_and_ambiguous_unlocks_and_eos_are_not_retried() {
     let packet = &packets()[0];
     let input = vec![0x42; config().frame_bytes().unwrap()];
-    for (call, pending) in [
-        ("lock-input", false),
-        ("unlock-input", false),
-        ("encode", true),
-        ("lock-output", true),
-        ("unlock-output", false),
+    for call in [
+        "lock-input",
+        "unlock-input",
+        "encode",
+        "lock-output",
+        "unlock-output",
     ] {
         let fixture = Fixture::new(0, call, 1);
         fixture.packet(packet);
@@ -307,12 +308,9 @@ fn encode_errors_are_terminal_and_ambiguous_unlocks_and_eos_are_not_retried() {
         drop(engine);
         let trace = fixture.trace();
         assert_eq!(trace.lines().filter(|l| *l == call).count(), 1, "{trace}");
-        assert_eq!(
-            trace.lines().filter(|l| *l == "eos").count(),
-            usize::from(pending),
-            "{trace}"
-        );
+        assert_eq!(trace.lines().filter(|l| *l == "eos").count(), 1, "{trace}");
         assert!(!trace.contains("destroy-locked"), "{trace}");
+        assert!(trace.find("eos").unwrap() < trace.find("destroy-output").unwrap());
     }
     let fixture = Fixture::new(0, "eos", 1);
     fixture.packet(packet);

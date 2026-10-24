@@ -40,7 +40,8 @@ and retain their original MIT permission/copyright notices.
 * Check output size, pointer, frame index, timestamp and picture type before
   copying/forwarding bytes. Match every successful input/output lock with one
   unlock attempt, including validation failures. Never repeat an ambiguous unlock.
-* Attempt EOS once when draining or cleaning potentially pending input. Release
+* Attempt EOS once before releasing any initialized encoder resources, including
+  close without explicit drain and cleanup after partial buffer allocation. Release
   all slots in reverse order, then session, then context, before unloading both
   libraries. Each destroy handle is removed from ownership before calling it.
   A failed acquisition cleans its partial resources, including failed probe.

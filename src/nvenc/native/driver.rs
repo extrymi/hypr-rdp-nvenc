@@ -643,10 +643,12 @@ impl Driver for NativeDriver {
             return Err(Error::Closed);
         }
         let mut failure = None;
-        if self.slots.iter().any(|s| s.pending.is_some()) {
-            if let Err(error) = self.flush(Phase::Destroy) {
-                failure = Some(error);
-            }
+        // The header's NvEncDestroyEncoder contract requires flushing before
+        // freeing resources, even if the last frame was already retrieved or
+        // initialization allocated no complete slot. Explicit drain shares the
+        // same once-only guard; failed flushes are never retried during Drop.
+        if let Err(error) = self.flush(Phase::Destroy) {
+            failure = Some(error);
         }
         // Remove ownership before every foreign destroy call: an error must
         // never cause a second attempt from Engine or NativeDriver::drop.
