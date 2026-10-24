@@ -46,16 +46,35 @@ jobs:
               out.write(f"ARCH_IMAGE={pins['image']}\nARCH_RUNTIME_IMAGE={pins['runtime_image']}\nARCH_SNAPSHOT={pins['snapshot']}\n")
           PY
 
+      - name: Restore checked package build for identical inputs
+        id: arch-cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: artifacts/
+          key: arch-package-v1-${{ hashFiles('pkg/arch/**', 'ci/arch.json', 'ci/baseline.json', 'rust-toolchain.toml', 'scripts/ci/arch-build.sh', 'scripts/ci/arch/pam-probe.c') }}
+
       - name: Build and check the real Arch package
+        if: steps.arch-cache.outputs.cache-hit != 'true'
         run: |
           set -o pipefail
           docker pull "$ARCH_IMAGE"
           docker image inspect "$ARCH_IMAGE" > artifacts/arch-image.json
           docker run --name hypr-arch-build \
+            -e GITHUB_RUN_ID -e GITHUB_SHA \
             -e ARCH_SNAPSHOT -e CARGO_BUILD_JOBS=2 -e CARGO_INCREMENTAL=0 \
             -e RUST_TEST_THREADS=2 -e PROPTEST_CASES=512 \
             -v "$PWD:/source:ro" -v "$PWD/artifacts:/out:rw" \
             "$ARCH_IMAGE" bash /source/scripts/ci/arch-build.sh 2>&1 | tee artifacts/arch-build.log
+
+      - name: Verify checked build output hashes
+        run: cd artifacts && sha256sum --check ARCH-BUILD-SHA256SUMS
+
+      - name: Save checked package before lifecycle testing
+        if: steps.arch-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: artifacts/
+          key: ${{ steps.arch-cache.outputs.cache-primary-key }}
 
       - name: Prepare a fresh Arch runtime root
         run: |

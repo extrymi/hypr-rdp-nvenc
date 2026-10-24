@@ -63,3 +63,5 @@ if critical:
     "packages": index, "without_packaged_notice_files": missing,
 }, indent=2) + "\n")
 print(f"Preserved notices for {len(index)} resolved packages; {len(missing)} have no standalone notice file (see index)")
+if missing:
+    print("Without standalone notice files: " + ", ".join(missing))
