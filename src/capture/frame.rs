@@ -1114,6 +1114,28 @@ impl FrameProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn forced_native_backend_refuses_non_avc_client_without_bitmap_substitution() {
+        let (shared, mut events) = negotiated_no_avc_egfx(64, 64);
+        let (tx, mut rx) = mpsc::channel(4);
+        let device = "GPU-01234567-89ab-cdef-0123-456789abcdef".parse().unwrap();
+        let mut proc = FrameProcessor::new_with_h264_backend(
+            Some(shared),
+            64,
+            64,
+            PixelFormat::BgrA32,
+            256,
+            1_000_000,
+            23,
+            H264RateControl::Cbr,
+            30,
+            H264BackendPolicy::Nvenc(device),
+        );
+        proc.queue_damage(&[(0, 0, 64, 64)]);
+        assert!(!proc.process(&[0; 64 * 64 * 4], &tx));
+        assert!(rx.try_recv().is_err());
+        drain_gfx_pdus(&mut events).assert_no_encoded_frame();
+    }
     #[cfg(feature = "nvenc")]
     #[test]
     fn native_failure_disconnects_strict_mode_and_auto_recovers_with_an_idr() {

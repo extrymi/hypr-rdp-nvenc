@@ -95,6 +95,58 @@ fn failure(output: &Output, expected: &str) {
 }
 
 #[tokio::test]
+async fn native_config_check_validates_without_runtime_directory_or_driver() {
+    let fixture = Fixture::new();
+    let (cert, key) = fixture.identity(false);
+    let output = fixture
+        .run(&[
+            "--check-config",
+            "--auth-mode",
+            "none",
+            "--cert",
+            path(&cert),
+            "--key",
+            path(&key),
+            "--h264-backend",
+            "nvenc",
+            "--nvenc-device",
+            "GPU-01234567-89ab-cdef-0123-456789abcdef",
+        ])
+        .await;
+    if cfg!(feature = "nvenc") {
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    } else {
+        failure(&output, "built without the nvenc feature");
+    }
+    assert!(!fixture.0.join("absent-runtime").exists());
+    fixture.no_home_writes();
+}
+
+#[tokio::test]
+async fn native_config_errors_precede_tls_and_desktop_without_writes() {
+    let fixture = Fixture::new();
+    for extra in [
+        vec!["--h264-backend", "nvenc"],
+        vec!["--h264-backend", "nvenc", "--nvenc-device", "0"],
+    ] {
+        let mut args = vec!["--check-config", "--auth-mode", "none"];
+        args.extend(extra);
+        let output = fixture.run(&args).await;
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !stderr.contains("TLS certificate") && !stderr.contains("Hyprland"),
+            "{stderr}"
+        );
+        fixture.no_home_writes();
+    }
+}
+
+#[tokio::test]
 async fn check_config_uses_existing_identity_without_desktop_listener_or_hooks() {
     let fixture = Fixture::new();
     let (cert, key) = fixture.identity(false);

@@ -24,11 +24,11 @@ pub fn dispatch_worker() -> Option<i32> {
         // SAFETY: fd3 was validated as this parent's connected Unix socket.
         // Dispatch owns it exclusively and the ordinary server never starts.
         let socket = unsafe { std::os::unix::net::UnixStream::from_raw_fd(super::WORKER_FD) };
-        return Some(if super::native::serve(socket).is_ok() {
+        Some(if super::native::serve(socket).is_ok() {
             0
         } else {
             1
-        });
+        })
     }
     #[cfg(not(feature = "nvenc"))]
     Some(2)
