@@ -5,6 +5,8 @@
 //! a lazy native adapter for worker use only. See ADR 0001 and native-nvenc.md.
 
 mod engine;
+mod blocking;
+mod entry;
 mod lease;
 mod policy;
 mod protocol;
@@ -17,6 +19,8 @@ mod annexb;
 pub mod native;
 
 pub use engine::{Driver, Engine, Submission};
+pub use blocking::BlockingWorker;
+pub use entry::{dispatch_worker, WORKER_ARGUMENT};
 pub use lease::DeviceLease;
 pub use policy::{plan, software_fallback_allowed, BackendMode, DeviceClass, Plan};
 pub use supervisor::{serve, Deadlines, Worker, WORKER_FD};

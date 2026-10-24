@@ -219,9 +219,9 @@ mod tests {
     fn live_worker_record_survives_dropped_parent_lease_until_process_is_gone() {
         let root = std::env::temp_dir().join(format!("hypr-rdp-lease-{}", std::process::id()));
         let device: DeviceId = "GPU-01234567-89ab-cdef-0123-456789abcdef".parse().unwrap();
-        let lease = DeviceLease::acquire(&root, device.clone()).unwrap();
+        let lease = DeviceLease::acquire(&root, device).unwrap();
         assert!(matches!(
-            DeviceLease::acquire(&root, device.clone()),
+            DeviceLease::acquire(&root, device),
             Err(Error::Quarantined)
         ));
         // A benign disposable child represents a worker whose exit has not
@@ -233,7 +233,7 @@ mod tests {
         lease.bind(child.id()).unwrap();
         drop(lease);
         let blocked = matches!(
-            DeviceLease::acquire(&root, device.clone()),
+            DeviceLease::acquire(&root, device),
             Err(Error::Quarantined)
         );
         child.kill().unwrap();
@@ -249,7 +249,7 @@ mod tests {
     fn inherited_descriptor_does_not_retain_a_released_parent_lock() {
         let root = std::env::temp_dir().join(format!("hypr-rdp-inherited-{}", std::process::id()));
         let device: DeviceId = "GPU-01234567-89ab-cdef-0123-456789abcdef".parse().unwrap();
-        let lease = DeviceLease::acquire(&root, device.clone()).unwrap();
+        let lease = DeviceLease::acquire(&root, device).unwrap();
         // dup shares the open file description, just like a descriptor
         // inherited by another thread's fork before the child reaches exec.
         let inherited = lease.lock.try_clone().unwrap();
@@ -269,7 +269,7 @@ mod tests {
         std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o755)).unwrap();
         let device: DeviceId = "GPU-01234567-89ab-cdef-0123-456789abcdef".parse().unwrap();
         assert!(matches!(
-            DeviceLease::acquire(&root, device.clone()),
+            DeviceLease::acquire(&root, device),
             Err(Error::StateStore)
         ));
         let link = root.with_extension("link");

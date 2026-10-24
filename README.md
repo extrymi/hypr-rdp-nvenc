@@ -1,5 +1,9 @@
 # hypr-rdp
 
+Fork development: the optional NVIDIA worker/AVC420 backend is described in
+[docs/nvenc-integration.md](docs/nvenc-integration.md). It remains hardware and
+client unqualified; this stage performs no workstation installation.
+
 Development fork: NVIDIA support is under construction. The current changes are
 documented in [NVENC development](docs/nvenc-development.md) and
 [startup validation](docs/startup-validation.md). CPU CI artifacts are not a

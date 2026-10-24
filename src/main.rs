@@ -13,11 +13,17 @@ use tracing_subscriber::EnvFilter;
 
 const DEFAULT_LOG_FILTER: &str = "hypr_rdp=info,ironrdp_server=error";
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    if let Some(status) = hypr_rdp::nvenc::dispatch_worker() {
+        std::process::exit(status);
+    }
     if let Some(status) = server::auth::dispatch_helper() {
         std::process::exit(status);
     }
+    tokio::runtime::Builder::new_multi_thread().enable_all().build()?.block_on(run())
+}
+
+async fn run() -> Result<()> {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     tracing_subscriber::fmt()

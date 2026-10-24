@@ -3,8 +3,8 @@ use std::{fmt, str::FromStr};
 use super::MAX_FRAME_BYTES;
 
 /// Stable NVIDIA UUID. Ordinals and DRM node names are deliberately not IDs.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DeviceId(String);
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DeviceId([u8; 16]);
 
 impl FromStr for DeviceId {
     type Err = Error;
@@ -14,7 +14,13 @@ impl FromStr for DeviceId {
         if !valid_uuid(suffix) {
             return Err(Error::InvalidConfig);
         }
-        Ok(Self(format!("GPU-{}", suffix.to_ascii_lowercase())))
+        let hex = suffix.replace('-', "");
+        let mut bytes = [0; 16];
+        for (index, byte) in bytes.iter_mut().enumerate() {
+            *byte = u8::from_str_radix(&hex[index * 2..index * 2 + 2], 16)
+                .map_err(|_| Error::InvalidConfig)?;
+        }
+        Ok(Self(bytes))
     }
 }
 
@@ -31,7 +37,14 @@ pub(super) fn valid_uuid(value: &str) -> bool {
 
 impl fmt::Display for DeviceId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
+        f.write_str("GPU-")?;
+        for (index, byte) in self.0.iter().enumerate() {
+            if [4, 6, 8, 10].contains(&index) {
+                f.write_str("-")?;
+            }
+            write!(f, "{byte:02x}")?;
+        }
+        Ok(())
     }
 }
 

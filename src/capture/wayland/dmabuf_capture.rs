@@ -465,7 +465,7 @@ pub(super) fn capture_loop_ext_dmabuf(
     let mut h264_encoder: Option<crate::egfx::FrameEncoder> = None;
     let mut encode_failures = DmaBufEncodeFailureTracker::new(MAX_ENCODE_FAILURES);
     let metadata_qp = match rate_control {
-        H264RateControl::Vbr => 0,
+        H264RateControl::Vbr | H264RateControl::Cbr => 0,
         H264RateControl::Cqp => quality.min(51),
     };
 

@@ -354,7 +354,7 @@ fn vaapi_rate_control_policy(
 ) -> VaapiRateControlPolicy {
     let qp = quality.min(51);
     match rate_control {
-        H264RateControl::Vbr => VaapiRateControlPolicy {
+        H264RateControl::Vbr | H264RateControl::Cbr => VaapiRateControlPolicy {
             config_mode: sys::VA_RC_VBR,
             pic_init_qp: H264_DEFAULT_PIC_INIT_QP,
             bits_per_second: bitrate,
@@ -479,6 +479,7 @@ impl VaapiEncoder {
         rate_control: H264RateControl,
         reference_mode: VaapiReferenceMode,
     ) -> Result<Self> {
+        anyhow::ensure!(rate_control != H264RateControl::Cbr, "CBR is currently supported only by NVENC");
         if width == 0 || height == 0 || !width.is_multiple_of(2) || !height.is_multiple_of(2) {
             bail!("dimensions must be non-zero and even: {}x{}", width, height);
         }

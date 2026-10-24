@@ -39,6 +39,39 @@ pub(super) fn is_buffer_parameters_changed(err: &anyhow::Error) -> bool {
     err.downcast_ref::<BufferParametersChanged>().is_some()
 }
 
+/// Apply the protocol's YInvert flag before scaling/damage comparison. Inverted
+/// frames own their rows so the pacer's deferred frame never borrows a temporary.
+#[allow(clippy::too_many_arguments)]
+fn prepare_wlr_presentation_frame<'a>(
+    data: &'a [u8], width: u32, height: u32, stride: u32, format: PixelFormat,
+    flags: u32, damage: &[(i32, i32, i32, i32)], snapshot: &crate::input::OutputLayoutSnapshot,
+) -> Result<crate::capture::scale::PreparedPresentationFrame<'a>> {
+    let oriented = orient_wlr_rows(data, width, height, stride, flags)?;
+    if matches!(oriented, std::borrow::Cow::Borrowed(_)) {
+        return prepare_presentation_frame(data, width, height, stride, format, damage, snapshot);
+    }
+    let frame = prepare_presentation_frame(&oriented, width, height, stride, format, damage, snapshot)?;
+    Ok(crate::capture::scale::PreparedPresentationFrame {
+        data: std::borrow::Cow::Owned(frame.data.into_owned()), width: frame.width, height: frame.height,
+        stride: frame.stride, damage_regions: frame.damage_regions, geometry_generation: frame.geometry_generation,
+    })
+}
+
+fn orient_wlr_rows(data: &[u8], width: u32, height: u32, stride: u32, flags: u32) -> Result<std::borrow::Cow<'_, [u8]>> {
+    let invert = zwlr_screencopy_frame_v1::Flags::YInvert.bits();
+    anyhow::ensure!(flags & !invert == 0, "unsupported WLR frame flags");
+    let size = (stride as usize).checked_mul(height as usize).context("WLR row size overflow")?;
+    anyhow::ensure!((stride as u64) >= width as u64 * 4 && data.len() >= size, "invalid WLR row layout");
+    if flags & invert == 0 { return Ok(std::borrow::Cow::Borrowed(data)); }
+    let mut flipped = vec![0; size];
+    for row in 0..height as usize {
+        let source = (height as usize - 1 - row) * stride as usize;
+        let dest = row * stride as usize;
+        flipped[dest..dest + stride as usize].copy_from_slice(&data[source..source + stride as usize]);
+    }
+    Ok(std::borrow::Cow::Owned(flipped))
+}
+
 fn reset_wlr_frame_state(state: &mut AppState) {
     state.active_wlr_frame_id = None;
     state.frame_ready = false;
@@ -47,6 +80,7 @@ fn reset_wlr_frame_state(state: &mut AppState) {
     state.buffer_width = 0;
     state.buffer_height = 0;
     state.wlr_stride = 0;
+    state.wlr_flags = 0;
     state.shm_format = None;
 }
 
@@ -186,7 +220,7 @@ pub(super) fn capture_loop_wlr(
         wl_shm::Format::Xrgb8888 => PixelFormat::BgrX32,
         wl_shm::Format::Xbgr8888 => PixelFormat::RgbX32,
         wl_shm::Format::Abgr8888 => PixelFormat::RgbA32,
-        _ => PixelFormat::BgrA32,
+        _ => bail!("unsupported WLR shared-memory pixel format: {shm_format:?}"),
     };
 
     tracing::info!(width, height, ?shm_format, stride, output = %output_name, mode = "wlr", fps, "Starting capture loop (double-buffered)");
@@ -258,6 +292,7 @@ pub(super) fn capture_loop_wlr(
         let completed_failed = state.frame_failed;
         let completed_idx = cap_idx;
         let completed_damage_regions = state.damage_regions.clone();
+        let completed_flags = state.wlr_flags;
         frame.destroy();
 
         // The next request may reuse the mmap backing a pacer-deferred frame.
@@ -303,14 +338,8 @@ pub(super) fn capture_loop_wlr(
             let snapshot = output_layout
                 .snapshot()
                 .context("output layout not initialized for capture scaling")?;
-            let prepared = prepare_presentation_frame(
-                data,
-                width,
-                height,
-                stride,
-                pixel_format,
-                &damage_regions,
-                &snapshot,
+            let prepared = prepare_wlr_presentation_frame(
+                data, width, height, stride, pixel_format, completed_flags, &damage_regions, &snapshot,
             )?;
             let action = output_downscaling_generation_action(processor_generation, &prepared);
             if action.refresh_processor {
@@ -526,5 +555,21 @@ mod tests {
         assert_eq!(state.buffer_height, 0);
         assert_eq!(state.wlr_stride, 0);
         assert_eq!(state.shm_format, None);
+    }
+}
+
+#[cfg(test)]
+mod orientation_tests {
+    use super::*;
+    #[test]
+    fn y_inverted_rows_are_restored_with_padding_and_unknown_flags_refused() {
+        let input: Vec<_> = (0..24).collect();
+        let flipped = orient_wlr_rows(&input, 2, 2, 12, 1).unwrap();
+        assert_eq!(&flipped[..12], &input[12..]);
+        assert_eq!(&flipped[12..], &input[..12]);
+        assert_eq!(orient_wlr_rows(&input, 2, 2, 12, 0).unwrap().as_ref(), &input);
+        assert!(orient_wlr_rows(&input, 2, 2, 12, 2).is_err());
+        assert!(orient_wlr_rows(&input[..4], 2, 2, 12, 1).is_err());
+        assert!(orient_wlr_rows(&input, 3, 2, 8, 1).is_err());
     }
 }
