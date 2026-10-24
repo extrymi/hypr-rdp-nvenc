@@ -1,4 +1,6 @@
-use super::{AccessUnit, Config, EncodedFrame, Error, Fault, Frame, Phase, BUFFER_COUNT, MAX_OUTPUT_BYTES};
+use super::{
+    AccessUnit, Config, EncodedFrame, Error, Fault, Frame, Phase, BUFFER_COUNT, MAX_OUTPUT_BYTES,
+};
 
 /// Distinguishes unaccepted input from accepted input with delayed output.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -37,7 +39,14 @@ pub struct Engine<D: Driver> {
 impl<D: Driver> Engine<D> {
     pub fn new(driver: D, config: Config) -> Result<Self, Error> {
         config.frame_bytes()?;
-        let mut engine = Self { driver, config, next_sequence: 0, allocated: 0, opened: false, active: false };
+        let mut engine = Self {
+            driver,
+            config,
+            next_sequence: 0,
+            allocated: 0,
+            opened: false,
+            active: false,
+        };
         engine.driver.probe(&engine.config)?;
         // Set before calling initialize: destroy must cover partial setup.
         engine.opened = true;
@@ -51,7 +60,9 @@ impl<D: Driver> Engine<D> {
     }
 
     pub fn encode(&mut self, frame: Frame<'_>) -> Result<EncodedFrame, Error> {
-        if !self.active { return Err(Error::Closed); }
+        if !self.active {
+            return Err(Error::Closed);
+        }
         if frame.stamp.epoch != self.config.epoch
             || frame.stamp.sequence != self.next_sequence
             || frame.nv12.len() != self.config.frame_bytes()?
@@ -59,9 +70,14 @@ impl<D: Driver> Engine<D> {
         {
             return Err(Error::InvalidFrame);
         }
-        let frame = Frame { force_idr: frame.force_idr || self.next_sequence == 0, ..frame };
+        let frame = Frame {
+            force_idr: frame.force_idr || self.next_sequence == 0,
+            ..frame
+        };
         let result = self.encode_inner(&frame);
-        if result.is_err() { self.active = false; }
+        if result.is_err() {
+            self.active = false;
+        }
         result
     }
 
@@ -80,15 +96,23 @@ impl<D: Driver> Engine<D> {
             }
         }
         let unit = self.driver.output(slot)?;
-        if unit.bytes.is_empty() || unit.bytes.len() > MAX_OUTPUT_BYTES || (frame.force_idr && !unit.is_idr) {
+        if unit.bytes.is_empty()
+            || unit.bytes.len() > MAX_OUTPUT_BYTES
+            || (frame.force_idr && !unit.is_idr)
+        {
             return Err(Error::backend(Phase::Encode, Fault::InvalidOutput));
         }
         self.next_sequence += 1;
-        Ok(EncodedFrame { stamp: frame.stamp, unit })
+        Ok(EncodedFrame {
+            stamp: frame.stamp,
+            unit,
+        })
     }
 
     pub fn drain(&mut self) -> Result<(), Error> {
-        if !self.active { return Err(Error::Closed); }
+        if !self.active {
+            return Err(Error::Closed);
+        }
         self.active = false;
         self.driver.drain()
     }
@@ -101,16 +125,22 @@ impl<D: Driver> Engine<D> {
         let mut failure = None;
         while self.allocated > 0 {
             self.allocated -= 1;
-            if let Err(error) = self.driver.release(self.allocated) { failure.get_or_insert(error); }
+            if let Err(error) = self.driver.release(self.allocated) {
+                failure.get_or_insert(error);
+            }
         }
         if self.opened {
             self.opened = false;
-            if let Err(error) = self.driver.destroy() { failure.get_or_insert(error); }
+            if let Err(error) = self.driver.destroy() {
+                failure.get_or_insert(error);
+            }
         }
         failure.map_or(Ok(()), Err)
     }
 }
 
 impl<D: Driver> Drop for Engine<D> {
-    fn drop(&mut self) { let _ = self.close(); }
+    fn drop(&mut self) {
+        let _ = self.close();
+    }
 }

@@ -135,12 +135,20 @@ pub enum Error {
     Protocol,
     Timeout(Phase),
     WorkerExited,
-    Backend { phase: Phase, fault: Fault, code: i32 },
+    Backend {
+        phase: Phase,
+        fault: Fault,
+        code: i32,
+    },
 }
 
 impl Error {
     pub fn backend(phase: Phase, fault: Fault) -> Self {
-        Self::Backend { phase, fault, code: 0 }
+        Self::Backend {
+            phase,
+            fault,
+            code: 0,
+        }
     }
 }
 

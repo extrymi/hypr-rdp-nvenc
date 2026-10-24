@@ -32,11 +32,19 @@ pub fn plan(mode: BackendMode, device: DeviceClass, quarantined: bool) -> Result
         Software => Ok(Plan::Software),
         Auto if quarantined => Ok(Plan::Software),
         Nvenc | Vaapi if quarantined => Err(Error::Quarantined),
-        Nvenc => Ok(Plan::Nvenc { software_fallback: false }),
-        Vaapi => Ok(Plan::Vaapi { software_fallback: false }),
+        Nvenc => Ok(Plan::Nvenc {
+            software_fallback: false,
+        }),
+        Vaapi => Ok(Plan::Vaapi {
+            software_fallback: false,
+        }),
         Auto => Ok(match device {
-            DeviceClass::Nvidia => Plan::Nvenc { software_fallback: true },
-            DeviceClass::Vaapi => Plan::Vaapi { software_fallback: true },
+            DeviceClass::Nvidia => Plan::Nvenc {
+                software_fallback: true,
+            },
+            DeviceClass::Vaapi => Plan::Vaapi {
+                software_fallback: true,
+            },
             DeviceClass::Unknown => Plan::Software,
         }),
     }
@@ -46,8 +54,28 @@ pub fn plan(mode: BackendMode, device: DeviceClass, quarantined: bool) -> Result
 /// after the old process has been reaped and for a classified backend failure.
 /// Protocol, state-store and transport faults require explicit investigation.
 pub fn software_fallback_allowed(plan: Plan, error: Error, reaped: bool) -> bool {
-    let allows = matches!(plan, Plan::Nvenc { software_fallback: true } | Plan::Vaapi { software_fallback: true });
+    let allows = matches!(
+        plan,
+        Plan::Nvenc {
+            software_fallback: true
+        } | Plan::Vaapi {
+            software_fallback: true
+        }
+    );
     allows
         && reaped
-        && matches!(error, Error::Backend { fault: Fault::LibraryMissing | Fault::ApiUnsupported | Fault::DeviceUnavailable | Fault::CapabilityUnsupported | Fault::Driver | Fault::Busy | Fault::DelayedOutput | Fault::InvalidOutput, .. })
+        && matches!(
+            error,
+            Error::Backend {
+                fault: Fault::LibraryMissing
+                    | Fault::ApiUnsupported
+                    | Fault::DeviceUnavailable
+                    | Fault::CapabilityUnsupported
+                    | Fault::Driver
+                    | Fault::Busy
+                    | Fault::DelayedOutput
+                    | Fault::InvalidOutput,
+                ..
+            }
+        )
 }

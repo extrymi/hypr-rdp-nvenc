@@ -12,7 +12,11 @@ pub(crate) enum Message {
     Hello,
     Init(Config),
     Ready,
-    Encode { stamp: Stamp, force_idr: bool, data: Vec<u8> },
+    Encode {
+        stamp: Stamp,
+        force_idr: bool,
+        data: Vec<u8>,
+    },
     Output(EncodedFrame),
     Drain,
     Destroy,
@@ -35,7 +39,11 @@ pub(crate) fn encode(message: &Message) -> Result<Vec<u8>, Error> {
             }
         }
         Message::Ready => out.push(2),
-        Message::Encode { stamp, force_idr, data } => {
+        Message::Encode {
+            stamp,
+            force_idr,
+            data,
+        } => {
             out.push(3);
             put_stamp(&mut out, *stamp);
             out.push(u8::from(*force_idr));
@@ -79,7 +87,9 @@ fn put_stamp(out: &mut Vec<u8>, stamp: Stamp) {
 }
 
 pub(crate) fn check_length(length: usize, limit: usize) -> Result<(), Error> {
-    if length < MAGIC.len() + 1 || length > limit { return Err(Error::Protocol); }
+    if length < MAGIC.len() + 1 || length > limit {
+        return Err(Error::Protocol);
+    }
     Ok(())
 }
 
@@ -87,31 +97,58 @@ struct Fields<'a>(&'a [u8]);
 
 impl<'a> Fields<'a> {
     fn take<const N: usize>(&mut self) -> Result<[u8; N], Error> {
-        let value = self.0.get(..N).ok_or(Error::Protocol)?.try_into().map_err(|_| Error::Protocol)?;
+        let value = self
+            .0
+            .get(..N)
+            .ok_or(Error::Protocol)?
+            .try_into()
+            .map_err(|_| Error::Protocol)?;
         self.0 = &self.0[N..];
         Ok(value)
     }
-    fn byte(&mut self) -> Result<u8, Error> { Ok(self.take::<1>()?[0]) }
-    fn boolean(&mut self) -> Result<bool, Error> {
-        match self.byte()? { 0 => Ok(false), 1 => Ok(true), _ => Err(Error::Protocol) }
+    fn byte(&mut self) -> Result<u8, Error> {
+        Ok(self.take::<1>()?[0])
     }
-    fn u32(&mut self) -> Result<u32, Error> { Ok(u32::from_le_bytes(self.take()?)) }
-    fn u64(&mut self) -> Result<u64, Error> { Ok(u64::from_le_bytes(self.take()?)) }
+    fn boolean(&mut self) -> Result<bool, Error> {
+        match self.byte()? {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(Error::Protocol),
+        }
+    }
+    fn u32(&mut self) -> Result<u32, Error> {
+        Ok(u32::from_le_bytes(self.take()?))
+    }
+    fn u64(&mut self) -> Result<u64, Error> {
+        Ok(u64::from_le_bytes(self.take()?))
+    }
     fn stamp(&mut self) -> Result<Stamp, Error> {
-        Ok(Stamp { epoch: self.u64()?, sequence: self.u64()? })
+        Ok(Stamp {
+            epoch: self.u64()?,
+            sequence: self.u64()?,
+        })
     }
 }
 
 pub(crate) fn decode(bytes: &[u8]) -> Result<Message, Error> {
-    if !bytes.starts_with(MAGIC) { return Err(Error::Protocol); }
+    if !bytes.starts_with(MAGIC) {
+        return Err(Error::Protocol);
+    }
     let mut fields = Fields(&bytes[MAGIC.len()..]);
     let result = match fields.byte()? {
         0 => Message::Hello,
         1 => {
             let device = fields.take::<40>()?;
             let config = Config {
-                device: std::str::from_utf8(&device).map_err(|_| Error::Protocol)?.parse().map_err(|_| Error::Protocol)?,
-                epoch: fields.u64()?, width: fields.u32()?, height: fields.u32()?, fps: fields.u32()?, bitrate: fields.u32()?,
+                device: std::str::from_utf8(&device)
+                    .map_err(|_| Error::Protocol)?
+                    .parse()
+                    .map_err(|_| Error::Protocol)?,
+                epoch: fields.u64()?,
+                width: fields.u32()?,
+                height: fields.u32()?,
+                fps: fields.u32()?,
+                bitrate: fields.u32()?,
             };
             config.frame_bytes()?;
             Message::Init(config)
@@ -122,8 +159,21 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<Message, Error> {
             let flag = fields.boolean()?;
             let data = fields.0.to_vec();
             fields.0 = &[];
-            if kind == 3 { Message::Encode { stamp, force_idr: flag, data } }
-            else { Message::Output(EncodedFrame { stamp, unit: AccessUnit { bytes: data, is_idr: flag } }) }
+            if kind == 3 {
+                Message::Encode {
+                    stamp,
+                    force_idr: flag,
+                    data,
+                }
+            } else {
+                Message::Output(EncodedFrame {
+                    stamp,
+                    unit: AccessUnit {
+                        bytes: data,
+                        is_idr: flag,
+                    },
+                })
+            }
         }
         5 => Message::Drain,
         6 => Message::Destroy,
@@ -131,11 +181,36 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<Message, Error> {
         8 => Message::Ack,
         9 => Message::Failure(match fields.byte()? {
             0 => {
-                let phase = [Phase::Startup, Phase::Probe, Phase::Initialize, Phase::Encode, Phase::Drain, Phase::Destroy, Phase::Exit]
-                    .get(fields.byte()? as usize).copied().ok_or(Error::Protocol)?;
-                let fault = [Fault::LibraryMissing, Fault::ApiUnsupported, Fault::DeviceUnavailable, Fault::CapabilityUnsupported, Fault::Driver, Fault::Busy, Fault::DelayedOutput, Fault::InvalidOutput]
-                    .get(fields.byte()? as usize).copied().ok_or(Error::Protocol)?;
-                Error::Backend { phase, fault, code: i32::from_le_bytes(fields.take()?) }
+                let phase = [
+                    Phase::Startup,
+                    Phase::Probe,
+                    Phase::Initialize,
+                    Phase::Encode,
+                    Phase::Drain,
+                    Phase::Destroy,
+                    Phase::Exit,
+                ]
+                .get(fields.byte()? as usize)
+                .copied()
+                .ok_or(Error::Protocol)?;
+                let fault = [
+                    Fault::LibraryMissing,
+                    Fault::ApiUnsupported,
+                    Fault::DeviceUnavailable,
+                    Fault::CapabilityUnsupported,
+                    Fault::Driver,
+                    Fault::Busy,
+                    Fault::DelayedOutput,
+                    Fault::InvalidOutput,
+                ]
+                .get(fields.byte()? as usize)
+                .copied()
+                .ok_or(Error::Protocol)?;
+                Error::Backend {
+                    phase,
+                    fault,
+                    code: i32::from_le_bytes(fields.take()?),
+                }
             }
             1 => Error::InvalidConfig,
             2 => Error::InvalidFrame,
@@ -144,7 +219,9 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<Message, Error> {
         }),
         _ => return Err(Error::Protocol),
     };
-    if !fields.0.is_empty() { return Err(Error::Protocol); }
+    if !fields.0.is_empty() {
+        return Err(Error::Protocol);
+    }
     Ok(result)
 }
 
