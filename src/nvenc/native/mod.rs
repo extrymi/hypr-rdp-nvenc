@@ -5,12 +5,16 @@ mod loader;
 
 // These bindings are generated from the pinned third-party C headers. Their
 // naming, unused declarations and unsafe bitfield accessors are not handwritten.
+// bindgen 0.69 uses signed/unsigned transmute in generated bitfield accessors;
+// newer Rust calls these unnecessary. Keep the generator output intact and
+// validate its layout/bitfields against C; handwritten code keeps strict lints.
 #[allow(
     non_camel_case_types,
     non_snake_case,
     non_upper_case_globals,
     dead_code,
     unused_imports,
+    unnecessary_transmutes,
     clippy::all
 )]
 mod ffi {
