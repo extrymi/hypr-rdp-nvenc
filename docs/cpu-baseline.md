@@ -35,7 +35,7 @@ The pull request to `main` runs formatting, Clippy, all upstream default/softwar
 
 A green run must include every required step. A skipped, cancelled, disabled or approval-pending run is not a passing baseline. If fork Actions are disabled, enable Actions in this repository and rerun this pull request's check; no merge is required to review the branch.
 
-The artifact includes test/build logs, environment and dependency provenance, ELF linkage, a checksum file and a tar archive preserving the binary mode. The archive is an upstream CPU baseline, not the NVENC implementation, an Arch package or a deployment release. GPU/NVENC, actual PAM/systemd/UFW, existing desktop, Windows/macOS, WOL and install/upgrade/purge gates remain open.
+The artifact includes test/build logs, environment and dependency provenance, ELF linkage, a checksum file and a tar archive preserving the binary mode. The archive is an upstream CPU baseline, not the NVENC implementation, an Arch package or a deployment release. GPU/NVENC, actual PAM/systemd, existing desktop, Windows/macOS, WOL and install/upgrade/purge gates remain open.
 
 For an already isolated environment with the dependencies installed:
 

@@ -30,7 +30,9 @@ async fn main() -> Result<()> {
     let config = config::RuntimeConfig::load()?;
     if config.check_config {
         server::check_config(config)?;
-        tracing::info!("Configuration, authentication prerequisites and existing TLS identity are valid");
+        tracing::info!(
+            "Configuration, authentication prerequisites and existing TLS identity are valid"
+        );
         return Ok(());
     }
     tracing::info!("Starting hypr-rdp on {}", config.bind);

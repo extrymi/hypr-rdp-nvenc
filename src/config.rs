@@ -260,7 +260,13 @@ impl ConfigFile {
                 let offset = error.span().map_or(0, |span| span.start);
                 let prefix = content.get(..offset).unwrap_or_default();
                 let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
-                let column = prefix.rsplit('\n').next().unwrap_or_default().chars().count() + 1;
+                let column = prefix
+                    .rsplit('\n')
+                    .next()
+                    .unwrap_or_default()
+                    .chars()
+                    .count()
+                    + 1;
                 let category = if error.message().starts_with("unknown field") {
                     "unknown configuration field"
                 } else {
@@ -1527,22 +1533,44 @@ mod pam_config_tests {
 
     #[test]
     fn incomplete_credentials_never_turn_into_anonymous_access() {
-        for file in ["username = 'user'", "password = 'secret'", "username = ''\npassword = ''", "username = 'user'\npassword = ''"] {
+        for file in [
+            "username = 'user'",
+            "password = 'secret'",
+            "username = ''\npassword = ''",
+            "username = 'user'\npassword = ''",
+        ] {
             assert!(resolve(&["hypr-rdp"], file).is_err());
         }
         for field in ["username", "password", "password_file", "pam_service"] {
-            assert!(resolve(&["hypr-rdp", "--auth-mode", "none"], &format!("{field} = ''")).is_err());
+            assert!(resolve(
+                &["hypr-rdp", "--auth-mode", "none"],
+                &format!("{field} = ''")
+            )
+            .is_err());
         }
     }
 
     #[test]
     fn unknown_keys_and_parse_errors_report_location_without_secrets() {
         for (name, text, category) in [
-            ("unknown-secret", "pasword = 'CANARY-SECRET'", "unknown configuration field"),
-            ("syntax-secret", "password = 'CANARY-SECRET' invalid", "invalid TOML"),
-            ("type-secret", "password = ['CANARY-SECRET']", "invalid TOML"),
+            (
+                "unknown-secret",
+                "pasword = 'CANARY-SECRET'",
+                "unknown configuration field",
+            ),
+            (
+                "syntax-secret",
+                "password = 'CANARY-SECRET' invalid",
+                "invalid TOML",
+            ),
+            (
+                "type-secret",
+                "password = ['CANARY-SECRET']",
+                "invalid TOML",
+            ),
         ] {
-            let path = std::env::temp_dir().join(format!("hypr-rdp-{name}-{}.toml", std::process::id()));
+            let path =
+                std::env::temp_dir().join(format!("hypr-rdp-{name}-{}.toml", std::process::id()));
             std::fs::write(&path, text).unwrap();
             let error = ConfigFile::load(Some(path.to_str().unwrap())).unwrap_err();
             let message = format!("{error:#}");

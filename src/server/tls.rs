@@ -2,7 +2,10 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::{fd::AsRawFd, unix::fs::OpenOptionsExt};
 use std::path::{Path, PathBuf};
-use std::sync::{atomic::{AtomicU64, Ordering}, Arc};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 use std::time::SystemTime;
 
 use anyhow::{Context, Result};
@@ -26,12 +29,20 @@ pub(super) struct PreparedTls {
 
 /// Prepare the same TLS object later handed to the server, before desktop I/O.
 /// ExistingOnly is used by --check-config and never generates an identity.
-pub(super) fn prepare(cert: Option<&str>, key: Option<&str>, provisioning: Provisioning) -> Result<PreparedTls> {
+pub(super) fn prepare(
+    cert: Option<&str>,
+    key: Option<&str>,
+    provisioning: Provisioning,
+) -> Result<PreparedTls> {
     let (cert, key) = resolve_tls_paths(cert, key, provisioning)?;
     load_identity_at(Path::new(&cert), Path::new(&key), SystemTime::now())
 }
 
-fn resolve_tls_paths(cert: Option<&str>, key: Option<&str>, provisioning: Provisioning) -> Result<(String, String)> {
+fn resolve_tls_paths(
+    cert: Option<&str>,
+    key: Option<&str>,
+    provisioning: Provisioning,
+) -> Result<(String, String)> {
     match (cert, key) {
         (Some(c), Some(k)) => Ok((c.to_string(), k.to_string())),
         (Some(_), None) => anyhow::bail!("--cert provided without --key"),
@@ -43,7 +54,10 @@ fn resolve_tls_paths(cert: Option<&str>, key: Option<&str>, provisioning: Provis
                 Provisioning::ExistingOnly => (dir.join("cert.pem"), dir.join("key.pem")),
                 Provisioning::CreateIfAbsent => auto_generate_tls_in(&dir)?,
             };
-            Ok((cert.to_string_lossy().into_owned(), key.to_string_lossy().into_owned()))
+            Ok((
+                cert.to_string_lossy().into_owned(),
+                key.to_string_lossy().into_owned(),
+            ))
         }
     }
 }
@@ -51,19 +65,40 @@ fn resolve_tls_paths(cert: Option<&str>, key: Option<&str>, provisioning: Provis
 /// Read through one descriptor, checking that descriptor's metadata. NONBLOCK
 /// allows rejecting a FIFO/device instead of hanging while opening it.
 fn read_pem(path: &Path, private: bool) -> Result<Vec<u8>> {
-    let file = OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC).open(path)
-        .with_context(|| format!("failed to open TLS {} {}", if private { "key" } else { "certificate" }, path.display()))?;
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC)
+        .open(path)
+        .with_context(|| {
+            format!(
+                "failed to open TLS {} {}",
+                if private { "key" } else { "certificate" },
+                path.display()
+            )
+        })?;
     let metadata = file.metadata().context("failed to inspect TLS file")?;
-    anyhow::ensure!(metadata.is_file(), "TLS file {} must be a regular file", path.display());
+    anyhow::ensure!(
+        metadata.is_file(),
+        "TLS file {} must be a regular file",
+        path.display()
+    );
     if private {
         use std::os::unix::fs::PermissionsExt;
-        anyhow::ensure!(metadata.permissions().mode() & 0o077 == 0,
-            "TLS private key {} must not be accessible by group or others (use mode 0600 or 0400)", path.display());
+        anyhow::ensure!(
+            metadata.permissions().mode() & 0o077 == 0,
+            "TLS private key {} must not be accessible by group or others (use mode 0600 or 0400)",
+            path.display()
+        );
     }
     let mut bytes = Vec::new();
-    file.take(MAX_TLS_FILE_BYTES + 1).read_to_end(&mut bytes).context("failed to read TLS file")?;
-    anyhow::ensure!(!bytes.is_empty() && bytes.len() as u64 <= MAX_TLS_FILE_BYTES,
-        "TLS file {} is empty or exceeds 1 MiB", path.display());
+    file.take(MAX_TLS_FILE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .context("failed to read TLS file")?;
+    anyhow::ensure!(
+        !bytes.is_empty() && bytes.len() as u64 <= MAX_TLS_FILE_BYTES,
+        "TLS file {} is empty or exceeds 1 MiB",
+        path.display()
+    );
     Ok(bytes)
 }
 
@@ -72,40 +107,69 @@ fn load_identity_at(cert_path: &Path, key_path: &Path, now: SystemTime) -> Resul
     let key_bytes = read_pem(key_path, true)?;
     // Never attach parser errors that might echo input/key material.
     let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(&cert_bytes)
-        .map(|item| item.map(CertificateDer::into_owned).map_err(|_| anyhow::anyhow!("invalid TLS certificate PEM")))
+        .map(|item| {
+            item.map(CertificateDer::into_owned)
+                .map_err(|_| anyhow::anyhow!("invalid TLS certificate PEM"))
+        })
         .collect::<Result<_>>()?;
-    anyhow::ensure!(!certs.is_empty(), "TLS certificate PEM contains no certificates");
+    anyhow::ensure!(
+        !certs.is_empty(),
+        "TLS certificate PEM contains no certificates"
+    );
     let mut keys = PrivateKeyDer::pem_slice_iter(&key_bytes)
         .map(|item| item.map_err(|_| anyhow::anyhow!("invalid TLS private key PEM")));
-    let key = keys.next().context("TLS key PEM contains no private key")??;
-    anyhow::ensure!(keys.next().is_none(), "TLS key PEM must contain exactly one private key");
+    let key = keys
+        .next()
+        .context("TLS key PEM contains no private key")??;
+    anyhow::ensure!(
+        keys.next().is_none(),
+        "TLS key PEM must contain exactly one private key"
+    );
     let mut pub_key = None;
     for (index, der) in certs.iter().enumerate() {
         let cert = x509_cert::Certificate::from_der(der.as_ref())
             .map_err(|_| anyhow::anyhow!("invalid X.509 certificate at chain position {index}"))?;
         let validity = cert.tbs_certificate().validity();
-        anyhow::ensure!(now >= validity.not_before.to_system_time(), "TLS certificate at chain position {index} is not yet valid");
-        anyhow::ensure!(now <= validity.not_after.to_system_time(), "TLS certificate at chain position {index} has expired");
+        anyhow::ensure!(
+            now >= validity.not_before.to_system_time(),
+            "TLS certificate at chain position {index} is not yet valid"
+        );
+        anyhow::ensure!(
+            now <= validity.not_after.to_system_time(),
+            "TLS certificate at chain position {index} has expired"
+        );
         if index == 0 {
             // CredSSP uses the leaf's public-key BIT STRING, matching the
             // pinned IronRDP helper's wire contract (not the full SPKI DER).
-            pub_key = Some(cert.tbs_certificate().subject_public_key_info().subject_public_key
-                .as_bytes().context("TLS public key is not byte-aligned")?.to_vec());
+            pub_key = Some(
+                cert.tbs_certificate()
+                    .subject_public_key_info()
+                    .subject_public_key
+                    .as_bytes()
+                    .context("TLS public key is not byte-aligned")?
+                    .to_vec(),
+            );
         }
     }
-    let config = rustls::ServerConfig::builder().with_no_client_auth()
+    let config = rustls::ServerConfig::builder()
+        .with_no_client_auth()
         .with_single_cert(certs, key)
         .context("TLS certificate and private key do not match or are unsupported")?;
     // Keep rustls' default NoKeyLog. Do not opt into SSLKEYLOGFILE as the
     // dependency helper does. Client authentication remains PAM/CredSSP.
-    Ok(PreparedTls { acceptor: TlsAcceptor::from(Arc::new(config)), pub_key: pub_key.context("TLS leaf certificate missing")? })
+    Ok(PreparedTls {
+        acceptor: TlsAcceptor::from(Arc::new(config)),
+        pub_key: pub_key.context("TLS leaf certificate missing")?,
+    })
 }
 
 fn entry_exists(path: &Path) -> Result<bool> {
     match fs::symlink_metadata(path) {
         Ok(_) => Ok(true),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error).with_context(|| format!("failed to inspect TLS path {}", path.display())),
+        Err(error) => {
+            Err(error).with_context(|| format!("failed to inspect TLS path {}", path.display()))
+        }
     }
 }
 
@@ -130,21 +194,35 @@ struct StagingDirectory(PathBuf);
 impl StagingDirectory {
     fn create(parent: &Path) -> Result<Self> {
         use std::os::unix::fs::DirBuilderExt;
-        let path = parent.join(format!(".tls-pending-{}-{}", std::process::id(), NEXT_STAGING.fetch_add(1, Ordering::Relaxed)));
-        fs::DirBuilder::new().mode(0o700).create(&path).context("failed to create private TLS staging directory")?;
+        let path = parent.join(format!(
+            ".tls-pending-{}-{}",
+            std::process::id(),
+            NEXT_STAGING.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&path)
+            .context("failed to create private TLS staging directory")?;
         Ok(Self(path))
     }
     fn write(&self, name: &str, bytes: &[u8], mode: u32) -> Result<PathBuf> {
         let path = self.0.join(name);
-        let mut file = OpenOptions::new().write(true).create_new(true).mode(mode).open(&path)
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(mode)
+            .open(&path)
             .context("failed to create staged TLS file")?;
-        file.write_all(bytes).context("failed to write staged TLS file")?;
+        file.write_all(bytes)
+            .context("failed to write staged TLS file")?;
         file.sync_all().context("failed to sync staged TLS file")?;
         Ok(path)
     }
 }
 impl Drop for StagingDirectory {
-    fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); }
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
 }
 
 /// Generate only if both paths are absent. Publish without replacing any entry.
@@ -153,29 +231,51 @@ impl Drop for StagingDirectory {
 fn auto_generate_tls_in(config_dir: &Path) -> Result<(PathBuf, PathBuf)> {
     let cert_path = config_dir.join("cert.pem");
     let key_path = config_dir.join("key.pem");
-    if reuse_pair(&cert_path, &key_path)? { return Ok((cert_path, key_path)); }
+    if reuse_pair(&cert_path, &key_path)? {
+        return Ok((cert_path, key_path));
+    }
     fs::create_dir_all(config_dir).context("failed to create config directory")?;
-    let lock_file = OpenOptions::new().read(true).write(true).create(true).truncate(false).mode(0o600)
+    let lock_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC)
-        .open(config_dir.join(".tls.lock")).context("failed to open TLS lock")?;
-    anyhow::ensure!(lock_file.metadata()?.is_file(), "TLS lock must be a regular file");
+        .open(config_dir.join(".tls.lock"))
+        .context("failed to open TLS lock")?;
+    anyhow::ensure!(
+        lock_file.metadata()?.is_file(),
+        "TLS lock must be a regular file"
+    );
     // SAFETY: lock_file owns a valid fd. LOCK_NB prevents an unbounded wait.
-    anyhow::ensure!(unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0,
-        "TLS identity provisioning is busy or unavailable; retry after the other process exits");
+    anyhow::ensure!(
+        unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0,
+        "TLS identity provisioning is busy or unavailable; retry after the other process exits"
+    );
     let _lock = IdentityLock(lock_file);
-    if reuse_pair(&cert_path, &key_path)? { return Ok((cert_path, key_path)); }
+    if reuse_pair(&cert_path, &key_path)? {
+        return Ok((cert_path, key_path));
+    }
 
     let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_RSA_SHA256)
         .context("failed to generate an RSA TLS key")?;
     let cert = rcgen::CertificateParams::new(vec!["localhost".into(), "127.0.0.1".into()])?
-        .self_signed(&key_pair).context("failed to generate TLS certificate")?;
+        .self_signed(&key_pair)
+        .context("failed to generate TLS certificate")?;
     let staging = StagingDirectory::create(config_dir)?;
     let tmp_key = staging.write("key.pem", key_pair.serialize_pem().as_bytes(), 0o600)?;
     let tmp_cert = staging.write("cert.pem", cert.pem().as_bytes(), 0o644)?;
     fs::hard_link(tmp_key, &key_path).context("failed to publish TLS key without replacement")?;
-    fs::hard_link(tmp_cert, &cert_path).context("failed to publish TLS certificate without replacement")?;
-    File::open(config_dir)?.sync_all().context("failed to sync TLS identity directory")?;
-    tracing::info!("Generated self-signed TLS identity in {}", config_dir.display());
+    fs::hard_link(tmp_cert, &cert_path)
+        .context("failed to publish TLS certificate without replacement")?;
+    File::open(config_dir)?
+        .sync_all()
+        .context("failed to sync TLS identity directory")?;
+    tracing::info!(
+        "Generated self-signed TLS identity in {}",
+        config_dir.display()
+    );
     Ok((cert_path, key_path))
 }
 
@@ -188,19 +288,23 @@ mod tests {
 
     #[test]
     fn resolve_tls_paths_requires_cert_and_key_pair() {
-        let cert_only =
-            resolve_tls_paths(Some("/tmp/cert.pem"), None, Provisioning::ExistingOnly).expect_err("cert without key must fail");
+        let cert_only = resolve_tls_paths(Some("/tmp/cert.pem"), None, Provisioning::ExistingOnly)
+            .expect_err("cert without key must fail");
         assert!(format!("{cert_only:#}").contains("--cert provided without --key"));
 
-        let key_only =
-            resolve_tls_paths(None, Some("/tmp/key.pem"), Provisioning::ExistingOnly).expect_err("key without cert must fail");
+        let key_only = resolve_tls_paths(None, Some("/tmp/key.pem"), Provisioning::ExistingOnly)
+            .expect_err("key without cert must fail");
         assert!(format!("{key_only:#}").contains("--key provided without --cert"));
     }
 
     #[test]
     fn resolve_tls_paths_preserves_custom_cert_and_key_paths() {
-        let (cert, key) = resolve_tls_paths(Some("/tmp/cert.pem"), Some("/tmp/key.pem"), Provisioning::ExistingOnly)
-            .expect("custom cert/key pair");
+        let (cert, key) = resolve_tls_paths(
+            Some("/tmp/cert.pem"),
+            Some("/tmp/key.pem"),
+            Provisioning::ExistingOnly,
+        )
+        .expect("custom cert/key pair");
 
         assert_eq!(cert, "/tmp/cert.pem");
         assert_eq!(key, "/tmp/key.pem");
@@ -355,7 +459,10 @@ mod tests {
         let path = dir.join("key.pem");
         std::os::unix::fs::symlink(dir.join("absent-target"), &path).unwrap();
         assert!(auto_generate_tls_in(&dir).is_err());
-        assert!(std::fs::symlink_metadata(&path).unwrap().file_type().is_symlink());
+        assert!(std::fs::symlink_metadata(&path)
+            .unwrap()
+            .file_type()
+            .is_symlink());
         assert!(!dir.join("cert.pem").exists());
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -370,14 +477,32 @@ mod tests {
         let original = TlsIdentityCtx::init_from_paths(&cert, &key).unwrap();
         assert_eq!(prepared.pub_key, original.pub_key);
         assert!(!prepared.acceptor.config().key_log.will_log("CLIENT_RANDOM"));
-        assert!(format!("{:#}", load_identity_at(&cert, &key, std::time::UNIX_EPOCH).err().unwrap()).contains("not yet valid"));
+        assert!(format!(
+            "{:#}",
+            load_identity_at(&cert, &key, std::time::UNIX_EPOCH)
+                .err()
+                .unwrap()
+        )
+        .contains("not yet valid"));
         let expired_time = std::time::UNIX_EPOCH + std::time::Duration::from_secs(2_000_000_000);
-        assert!(format!("{:#}", load_identity_at(&cert, &key, expired_time).err().unwrap()).contains("expired"));
+        assert!(format!(
+            "{:#}",
+            load_identity_at(&cert, &key, expired_time).err().unwrap()
+        )
+        .contains("expired"));
         std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o644)).unwrap();
-        assert!(format!("{:#}", load_identity_at(&cert, &key, valid_time).err().unwrap()).contains("group or others"));
+        assert!(format!(
+            "{:#}",
+            load_identity_at(&cert, &key, valid_time).err().unwrap()
+        )
+        .contains("group or others"));
         std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600)).unwrap();
         std::fs::write(&key, rcgen::KeyPair::generate().unwrap().serialize_pem()).unwrap();
-        assert!(format!("{:#}", load_identity_at(&cert, &key, valid_time).err().unwrap()).contains("do not match"));
+        assert!(format!(
+            "{:#}",
+            load_identity_at(&cert, &key, valid_time).err().unwrap()
+        )
+        .contains("do not match"));
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -386,7 +511,9 @@ mod tests {
         let dir = unique_temp_dir();
         let (cert, key) = fixed_pair(&dir);
         std::fs::write(&key, "CANARY-PRIVATE-KEY").unwrap();
-        let error = load_identity_at(&cert, &key, std::time::SystemTime::now()).err().unwrap();
+        let error = load_identity_at(&cert, &key, std::time::SystemTime::now())
+            .err()
+            .unwrap();
         assert!(!format!("{error:#}").contains("CANARY-PRIVATE-KEY"));
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -398,7 +525,10 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let lock = super::IdentityLock(std::fs::File::create(dir.join(".tls.lock")).unwrap());
         // SAFETY: lock owns the descriptor. This is a disposable test file.
-        assert_eq!(unsafe { libc::flock(lock.0.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) }, 0);
+        assert_eq!(
+            unsafe { libc::flock(lock.0.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
+            0
+        );
         assert!(auto_generate_tls_in(&dir).is_err());
         assert!(!dir.join("cert.pem").exists());
         assert!(!dir.join("key.pem").exists());

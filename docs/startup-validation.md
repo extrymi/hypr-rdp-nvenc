@@ -74,6 +74,12 @@ The X.509 parser is the already locked x509-cert 0.3.0 used by IronRDP; making i
 a direct dependency changes only the root dependency edge, without upgrading or
 adding any of the 484 locked packages. Manifest hashes are updated explicitly.
 
+The compatibility reference is the pinned
+[IronRDP TLS helper](https://github.com/Devolutions/IronRDP/blob/3db08ba86983ce35c9d36ad33f59ceb4b607dce8/crates/ironrdp-server/src/helper.rs).
+It also explains why this loader builds the acceptor directly: the helper opts
+into environment-controlled key logging. Validity/public-key parsing uses the
+same [x509-cert 0.3.0 API](https://github.com/RustCrypto/formats/tree/c478c6bb0db65677e85e2c0297962817eed90352/x509-cert).
+
 ## Validation and rollback
 
 Unit tests cover configuration errors, non-disclosing diagnostics, key permissions,
