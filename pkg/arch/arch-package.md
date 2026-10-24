@@ -33,6 +33,11 @@ source recipe bundle, `.PKGINFO`, `.BUILDINFO`, file inventory, hashes, linkage,
 compiler/package provenance and lifecycle logs. Packages are not signed releases;
 compare the artifact's recorded hash before installing a downloaded package.
 Build provenance is recorded, not a claim of bit-for-bit reproducible binaries.
+CI may reuse a checked package build only for the same recipe/source files,
+toolchain/image/snapshot pins, builder script and PAM probe. Output hashes are
+checked after restore, and ARCH-BUILD-PROVENANCE.json identifies the originating
+run. Lifecycle tests always use a newly prepared runtime root. No Cargo target
+cache or workstation state is reused.
 
 ## Install, without automatic activation
 

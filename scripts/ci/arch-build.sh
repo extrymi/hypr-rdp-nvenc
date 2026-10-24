@@ -37,3 +37,14 @@ for package in /out/*.pkg.tar.zst; do
         echo 'Unexpected package side-effect surface' >&2; exit 1
     fi
 done
+python3 - <<'PY'
+import hashlib, json, os
+from pathlib import Path
+root = Path('/out')
+(root / 'ARCH-BUILD-PROVENANCE.json').write_text(json.dumps({
+    'run_id': os.environ['GITHUB_RUN_ID'], 'tested_merge': os.environ['GITHUB_SHA'],
+    'runtime_source': 'fd4b702b7e7454d98eda0d155a75c4b0c56c2092',
+}, indent=2) + '\n')
+files = [p for p in sorted(root.iterdir()) if p.is_file() and p.name not in {'arch-build.log', 'ARCH-BUILD-SHA256SUMS'}]
+(root / 'ARCH-BUILD-SHA256SUMS').write_text(''.join(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n' for p in files))
+PY
