@@ -68,6 +68,38 @@ capture and use the existing capture-death connection termination; they do not
 substitute bitmap output. A strict backend also refuses a client without AVC.
 This tears down the remote connection, not Hyprland or the user's applications.
 
+## Operation and diagnostics
+
+A strict backend logs why it ends capture: the client did not negotiate AVC, the
+graphics pipeline was not opened within the activation grace (2 s) or was
+closed, the AVC encoder or surface is unavailable, or the encoder produced no
+usable output. Unusable native NVENC output ends capture in auto mode too. The
+connection ends; Hyprland and the applications keep running.
+
+Refused NVENC output is reported as `NVENC: Backend { phase: Encode, fault:
+InvalidOutput, code: N }`. N names the check: 1 input mapping/pitch, 2 bitstream
+pointer, 3 bitstream size, 4 hwEncodeStatus, 5 output timestamp, 6 frameIdx,
+7 picture type, 8 Annex B structure, 9 emulation prevention, 10 SPS size
+(displayed size or coded bounds), 11 IDR agreement (including a requested IDR
+answered with a P picture), 12 engine bounds; 0 is unclassified. Driver and
+CUDA status codes appear only with `fault: Driver` or `DeviceUnavailable`.
+
+The worker and the PAM helper start from the running server image, so a
+package upgrade does not break new sessions of a running service. Shared
+libraries still load from the current system: restart the user service after
+upgrading this package or its libraries, and reboot after an NVIDIA driver
+upgrade (a userspace/kernel mismatch fails NVENC initialization; strict mode
+ends the session, auto mode falls back to software).
+
+The local EGFX frame window charges a frame under the IronRDP pipeline lock and
+only while IronRDP tracks it, so a graphics reset (client CapsAdvertise, resize,
+channel close) or an acknowledgement suspension cannot leave a stale charge.
+
+Use `auth_mode = "configured"` with a long random password for remote access. In
+the TLS-only modes (`pam`, `none`) the pinned IronRDP serves one pending
+connection at a time without a handshake deadline or TCP keepalive, and the Arch
+PAM stack shares `pam_faillock` with sudo and login.
+
 ## CPU evidence and open gates
 
 CI tests the actual executable's private dispatch/Hello without sending Init,
