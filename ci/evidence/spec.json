@@ -1,39 +1,26 @@
 {
   "cases": [
     {
-      "id": "b1-v3-before",
-      "revision": "1bf9d12bf170826674a8da48cae9b498ffa52f72",
+      "id": "b3-02-before",
+      "revision": "775a96dca420f11a8e4a23a1462750a76d1e70f7",
       "cargo": ["--features", "nvenc", "--bin", "hypr-rdp"],
       "tests": {
-        "egfx::tests::avc420_caps_readvertise_after_queue_leaves_no_phantom_charge":
-          {"result": "FAILED", "messages": ["AVC420 CapsAdvertise after queue left a phantom charge", "  left: 1\n right: 0"]},
-        "egfx::tests::avc444_caps_readvertise_after_queue_leaves_no_phantom_charge":
-          {"result": "FAILED", "messages": ["AVC444 CapsAdvertise after queue left a phantom charge", "  left: 1\n right: 0"]},
-        "egfx::tests::avc420_resize_after_queue_leaves_no_phantom_charge":
-          {"result": "FAILED", "messages": ["resize after queue left a phantom charge", "  left: 1\n right: 0"]},
-        "egfx::output_queue_tests::output_queue_frames_sent_while_acks_are_suspended_do_not_charge_after_resume":
-          {"result": "FAILED", "messages": ["ClearCodec: suspended frames left charges after resume", "  left: 3\n right: 0"]},
-        "egfx::tests::rejected_publication_leaves_no_local_charge": {"result": "ok"}
+        "egfx::tests::late_suspend_ack_for_a_frame_before_a_graphics_reset_clears_the_window":
+          {"result": "FAILED", "messages": ["late suspend ACK before the reset cutoff left charges after resume", "  left: 1\n right: 0"]}
       }
     },
     {
-      "id": "b1-v3-after",
-      "revision": "e7ee051b9f67a1225ed0cda57cc86592abe3b759",
+      "id": "b3-02-after",
+      "revision": "fc7767df24fd149d45787783958aa4f28b9ac59e",
       "cargo": ["--features", "nvenc", "--bin", "hypr-rdp"],
       "tests": {
-        "egfx::tests::avc420_caps_readvertise_after_queue_leaves_no_phantom_charge": {"result": "ok"},
-        "egfx::tests::avc444_caps_readvertise_after_queue_leaves_no_phantom_charge": {"result": "ok"},
-        "egfx::tests::avc420_resize_after_queue_leaves_no_phantom_charge": {"result": "ok"},
-        "egfx::output_queue_tests::output_queue_frames_sent_while_acks_are_suspended_do_not_charge_after_resume": {"result": "ok"},
-        "egfx::tests::rejected_publication_leaves_no_local_charge": {"result": "ok"},
-        "egfx::tests::avc420_ack_inside_publication_window_releases_local_window": {"result": "ok"},
-        "egfx::tests::avc444_ack_inside_publication_window_releases_local_window": {"result": "ok"},
-        "egfx::output_queue_tests::output_queue_closed_receiver_releases_slots": {"result": "ok"},
-        "egfx::output_queue_tests::output_queue_suspended_ack_bounds_all_codecs_and_resumes_without_ack": {"result": "ok"},
+        "egfx::tests::late_suspend_ack_for_a_frame_before_a_graphics_reset_clears_the_window": {"result": "ok"},
         "egfx::tests::tracked_queue_policy_honors_client_ack_suspend": {"result": "ok"},
-        "egfx::tests::resize_generation_ignores_stale_frame_ack": {"result": "ok"}
+        "egfx::tests::resize_generation_ignores_stale_frame_ack": {"result": "ok"},
+        "egfx::output_queue_tests::output_queue_frames_sent_while_acks_are_suspended_do_not_charge_after_resume": {"result": "ok"},
+        "egfx::output_queue_tests::output_queue_suspended_ack_bounds_all_codecs_and_resumes_without_ack": {"result": "ok"}
       },
-      "suites": [{"filter": "egfx::", "min_passed": 167}]
+      "suites": [{"filter": "egfx::", "min_passed": 168}]
     }
   ]
 }
