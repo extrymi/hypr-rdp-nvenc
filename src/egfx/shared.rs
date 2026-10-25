@@ -486,9 +486,13 @@ mod tests {
         let start = Instant::now();
 
         assert!(!shared.bitmap_fallback_due(start, "test"));
-        assert!(!shared.bitmap_fallback_due(start + GFX_READY_GRACE - Duration::from_millis(1), "test"));
+        assert!(
+            !shared.bitmap_fallback_due(start + GFX_READY_GRACE - Duration::from_millis(1), "test")
+        );
         assert!(shared.bitmap_fallback_due(start + GFX_READY_GRACE, "test"));
-        assert!(shared.bitmap_fallback_due(start + GFX_READY_GRACE + Duration::from_secs(1), "test"));
+        assert!(
+            shared.bitmap_fallback_due(start + GFX_READY_GRACE + Duration::from_secs(1), "test")
+        );
     }
 
     #[test]

@@ -1193,7 +1193,10 @@ mod tests {
         });
         assert!(rx.try_recv().is_err());
         assert!(logs.contains("the graphics pipeline is not open"), "{logs}");
-        assert!(logs.contains("the strict H.264 backend ends the session"), "{logs}");
+        assert!(
+            logs.contains("the strict H.264 backend ends the session"),
+            "{logs}"
+        );
         assert!(!logs.contains("sending bitmap updates instead"), "{logs}");
     }
 
