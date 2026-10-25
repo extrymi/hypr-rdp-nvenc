@@ -207,8 +207,9 @@ impl EgfxShared {
         self.gfx_ever_ready.store(true, Ordering::Release);
     }
 
-    /// Returns true after the bounded activation wait has expired.
-    pub(crate) fn bitmap_fallback_due(&self, now: Instant) -> bool {
+    /// Returns true after the bounded activation wait has expired. The caller
+    /// names what it does then; that consequence is logged once.
+    pub(crate) fn bitmap_fallback_due(&self, now: Instant, consequence: &'static str) -> bool {
         if self.gfx_ever_ready.load(Ordering::Acquire) {
             return true;
         }
@@ -225,7 +226,7 @@ impl EgfxShared {
         if !self.gfx_fallback_logged.swap(true, Ordering::AcqRel) {
             tracing::warn!(
                 waited_ms = waited.as_millis(),
-                "The client has not opened the graphics pipeline; sending bitmap updates instead"
+                "The client has not opened the graphics pipeline; {consequence}"
             );
         }
         true
@@ -484,10 +485,10 @@ mod tests {
         let shared = shared();
         let start = Instant::now();
 
-        assert!(!shared.bitmap_fallback_due(start));
-        assert!(!shared.bitmap_fallback_due(start + GFX_READY_GRACE - Duration::from_millis(1)));
-        assert!(shared.bitmap_fallback_due(start + GFX_READY_GRACE));
-        assert!(shared.bitmap_fallback_due(start + GFX_READY_GRACE + Duration::from_secs(1)));
+        assert!(!shared.bitmap_fallback_due(start, "test"));
+        assert!(!shared.bitmap_fallback_due(start + GFX_READY_GRACE - Duration::from_millis(1), "test"));
+        assert!(shared.bitmap_fallback_due(start + GFX_READY_GRACE, "test"));
+        assert!(shared.bitmap_fallback_due(start + GFX_READY_GRACE + Duration::from_secs(1), "test"));
     }
 
     #[test]
@@ -495,13 +496,13 @@ mod tests {
         let shared = shared();
         let start = Instant::now();
 
-        assert!(!shared.bitmap_fallback_due(start));
+        assert!(!shared.bitmap_fallback_due(start, "test"));
         shared.note_gfx_ready();
-        assert!(shared.bitmap_fallback_due(start + Duration::from_millis(1)));
+        assert!(shared.bitmap_fallback_due(start + Duration::from_millis(1), "test"));
 
         shared.reset_for_new_client();
         let next = start + Duration::from_secs(1);
-        assert!(!shared.bitmap_fallback_due(next));
-        assert!(shared.bitmap_fallback_due(next + GFX_READY_GRACE));
+        assert!(!shared.bitmap_fallback_due(next, "test"));
+        assert!(shared.bitmap_fallback_due(next + GFX_READY_GRACE, "test"));
     }
 }

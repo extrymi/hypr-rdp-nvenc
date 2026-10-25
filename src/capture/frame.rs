@@ -670,6 +670,9 @@ impl FrameProcessor {
             .is_some_and(|shared| shared.is_ready() && !shared.is_avc_enabled())
         {
             if !self.h264_backend.allows_software() {
+                tracing::error!(
+                    "The EGFX client did not negotiate AVC; the strict H.264 backend ends the capture session"
+                );
                 return false;
             }
             return self.process_clearcodec(data);
@@ -940,6 +943,9 @@ impl FrameProcessor {
                             if !self.h264_backend.allows_software()
                                 || self.h264_encoder.as_ref().is_some_and(|e| e.is_nvenc())
                             {
+                                tracing::error!(
+                                    "H.264 encoder produced no usable output under a strict backend; ending capture session"
+                                );
                                 return false;
                             }
                             self.encode_failures += 1;
@@ -966,7 +972,7 @@ impl FrameProcessor {
                                     tracing::error!(%e, "NVENC failed; ending capture session");
                                     return false;
                                 }
-                                tracing::warn!(%e, "NVENC worker exited; recovering with software VBR and a full IDR");
+                                tracing::warn!(%e, "NVENC failed and its worker was reaped; recovering with software VBR and a full IDR");
                                 let replacement =
                                     crate::egfx::FrameEncoder::new_software_only_for_egfx_codec(
                                         EgfxCodec::Avc420,
@@ -1078,15 +1084,31 @@ impl FrameProcessor {
             self.egfx_active && self.h264_encoder.is_some() && self.egfx_surface_id.is_some();
         let should_send_bitmap = match egfx_state {
             None => true,
-            Some((false, _)) => self
-                .egfx_shared
-                .as_ref()
-                .is_some_and(|shared| shared.bitmap_fallback_due(now)),
+            Some((false, _)) => self.egfx_shared.as_ref().is_some_and(|shared| {
+                shared.bitmap_fallback_due(
+                    now,
+                    if self.h264_backend.allows_software() {
+                        "sending bitmap updates instead"
+                    } else {
+                        "the strict H.264 backend ends the session"
+                    },
+                )
+            }),
             Some((true, avc_enabled)) => !avc_enabled || !egfx_runtime_available,
         };
 
         if !sent_via_egfx && should_send_bitmap {
             if !self.h264_backend.allows_software() {
+                let reason = match egfx_state {
+                    None => "the client has no graphics pipeline",
+                    Some((false, _)) => "the graphics pipeline is not open",
+                    Some((true, false)) => "the client did not negotiate AVC",
+                    Some((true, true)) => "the AVC encoder or surface is unavailable",
+                };
+                tracing::error!(
+                    reason,
+                    "Strict H.264 backend cannot substitute bitmaps; ending capture session"
+                );
                 return false;
             }
             self.sent_first_frame = true;

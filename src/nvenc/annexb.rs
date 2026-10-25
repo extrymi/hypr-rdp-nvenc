@@ -1,9 +1,13 @@
 //! Bounded H.264 framing/parameter checks for the fixed progressive AVC420 path.
 //! This is not a replacement for decoder/hardware conformance qualification.
-use super::{AccessUnit, Error, Fault, Phase, MAX_OUTPUT_BYTES};
+use super::{AccessUnit, Error, OutputCheck, MAX_OUTPUT_BYTES};
 
 fn invalid() -> Error {
-    Error::backend(Phase::Encode, Fault::InvalidOutput)
+    Error::invalid_output(OutputCheck::AnnexB)
+}
+
+fn refused(check: OutputCheck) -> Error {
+    Error::invalid_output(check)
 }
 
 #[derive(Default)]
@@ -53,7 +57,7 @@ impl AnnexB {
                     }
                     let (id, w, h) = sps(nal)?;
                     if w != width || h != height {
-                        return Err(invalid());
+                        return Err(refused(OutputCheck::Geometry));
                     }
                     fresh_sps = Some((id, nal.to_vec()));
                 }
@@ -89,7 +93,10 @@ impl AnnexB {
                         });
                     }
                     let p = parameters.as_ref().ok_or_else(invalid)?;
-                    if p.width != width || p.height != height || p.sps_id > 31 {
+                    if p.width != width || p.height != height {
+                        return Err(refused(OutputCheck::Geometry));
+                    }
+                    if p.sps_id > 31 {
                         return Err(invalid());
                     }
                     let mut bits = Bits::new(nal, p.cabac)?;
@@ -126,7 +133,7 @@ impl AnnexB {
         }
         let is_idr = slice.ok_or_else(invalid)?;
         if is_idr != driver_idr || (force_idr && !is_idr) {
-            return Err(invalid());
+            return Err(refused(OutputCheck::IdrAgreement));
         }
         // A recovery/first IDR must carry this generation's parameter sets,
         // rather than borrowing stale state from a previous encoder instance.
@@ -230,13 +237,13 @@ impl Bits {
                 match nal.get(index + 2) {
                     Some(next) if *next <= 3 => {}
                     None if cabac_slice => {}
-                    _ => return Err(invalid()),
+                    _ => return Err(refused(OutputCheck::EmulationPrevention)),
                 }
                 zeros = 0;
                 continue;
             }
             if zeros >= 2 && byte <= 2 {
-                return Err(invalid());
+                return Err(refused(OutputCheck::EmulationPrevention));
             }
             rbsp.push(byte);
             zeros = if byte == 0 { zeros + 1 } else { 0 };
