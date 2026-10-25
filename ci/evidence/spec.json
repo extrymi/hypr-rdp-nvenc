@@ -1,50 +1,123 @@
 {
   "cases": [
     {
-      "id": "fdiag-before-lib",
-      "revision": "6584dcdee9c0bb5152e62406c69f2a588c13e9ed",
-      "cargo": ["--features", "nvenc", "--lib"],
+      "id": "fdiag2-before-lib",
+      "revision": "637b3e3dfe2fc4cc3d712c39ee95ffa1b719fabe",
+      "cargo": [
+        "--features",
+        "nvenc",
+        "--lib"
+      ],
       "tests": {
-        "nvenc::native::tests::output_failures_always_unlock_and_never_forward_invalid_or_stale_data":
-          {"result": "FAILED", "messages": ["mode 2", "code: 0", "code: 5"]},
-        "nvenc::tests::empty_output_or_missing_requested_idr_ends_generation":
-          {"result": "FAILED", "messages": ["code: 0", "code: 12"]},
-        "nvenc::native::tests::annexb_rejects_bad_boundaries_parameter_sets_geometry_and_idr_mismatch":
-          {"result": "FAILED", "messages": ["code: 0", "code: 10"]}
+        "nvenc::annexb::tests::oversized_coded_geometry_cannot_hide_behind_a_small_display_crop": {
+          "result": "FAILED",
+          "messages": [
+            "code: 8",
+            "code: 10"
+          ]
+        },
+        "nvenc::native::tests::annexb_rejects_bad_boundaries_parameter_sets_geometry_and_idr_mismatch": {
+          "result": "ok"
+        },
+        "nvenc::native::tests::cabac_zero_word_tail_is_kept_for_cabac_slices_and_rejected_for_cavlc": {
+          "result": "ok"
+        }
       }
     },
     {
-      "id": "fdiag-before-bin",
-      "revision": "6584dcdee9c0bb5152e62406c69f2a588c13e9ed",
-      "cargo": ["--features", "nvenc", "--bin", "hypr-rdp"],
+      "id": "fdiag2-before-bin",
+      "revision": "637b3e3dfe2fc4cc3d712c39ee95ffa1b719fabe",
+      "cargo": [
+        "--features",
+        "nvenc",
+        "--bin",
+        "hypr-rdp"
+      ],
       "tests": {
-        "capture::frame::tests::forced_native_backend_refuses_non_avc_client_without_bitmap_substitution":
-          {"result": "FAILED", "messages": ["panicked at src/capture/frame.rs"]},
-        "capture::frame::tests::forced_native_backend_ends_session_when_the_graphics_pipeline_never_opens":
-          {"result": "FAILED", "messages": ["panicked at src/capture/frame.rs", "sending bitmap updates instead"]}
+        "capture::frame::tests::dmabuf_activation_timeout_leaves_the_bitmap_warning_to_shm_capture": {
+          "result": "FAILED",
+          "messages": [
+            "panicked at src/capture/frame.rs",
+            "the bitmap substitution the user sees must be logged",
+            "falling back from DMA-BUF to SHM capture"
+          ]
+        }
       }
     },
     {
-      "id": "fdiag-after-lib",
-      "revision": "4e41cbc2e388428b18dd1c9d5e4f1ff3d27006c7",
-      "cargo": ["--features", "nvenc", "--lib"],
+      "id": "fdiag2-after-lib",
+      "revision": "2e9e22aa8d673b180194b4c5a9f2cb9bcbbb1897",
+      "cargo": [
+        "--features",
+        "nvenc",
+        "--lib"
+      ],
       "tests": {
-        "nvenc::native::tests::output_failures_always_unlock_and_never_forward_invalid_or_stale_data": {"result": "ok"},
-        "nvenc::tests::empty_output_or_missing_requested_idr_ends_generation": {"result": "ok"},
-        "nvenc::native::tests::annexb_rejects_bad_boundaries_parameter_sets_geometry_and_idr_mismatch": {"result": "ok"}
+        "nvenc::annexb::tests::oversized_coded_geometry_cannot_hide_behind_a_small_display_crop": {
+          "result": "ok"
+        },
+        "nvenc::native::tests::annexb_rejects_bad_boundaries_parameter_sets_geometry_and_idr_mismatch": {
+          "result": "ok"
+        },
+        "nvenc::native::tests::cabac_zero_word_tail_is_kept_for_cabac_slices_and_rejected_for_cavlc": {
+          "result": "ok"
+        }
       },
-      "suites": [{"filter": "nvenc::", "min_passed": 94}]
+      "suites": [
+        {
+          "filter": "nvenc::",
+          "min_passed": 94
+        }
+      ]
     },
     {
-      "id": "fdiag-after-bin",
-      "revision": "4e41cbc2e388428b18dd1c9d5e4f1ff3d27006c7",
-      "cargo": ["--features", "nvenc", "--bin", "hypr-rdp"],
+      "id": "fdiag2-after-bin",
+      "revision": "2e9e22aa8d673b180194b4c5a9f2cb9bcbbb1897",
+      "cargo": [
+        "--features",
+        "nvenc",
+        "--bin",
+        "hypr-rdp"
+      ],
       "tests": {
-        "capture::frame::tests::forced_native_backend_refuses_non_avc_client_without_bitmap_substitution": {"result": "ok"},
-        "capture::frame::tests::forced_native_backend_ends_session_when_the_graphics_pipeline_never_opens": {"result": "ok"},
-        "capture::frame::tests::native_failure_disconnects_strict_mode_and_auto_recovers_with_an_idr": {"result": "ok"}
+        "capture::frame::tests::dmabuf_activation_timeout_leaves_the_bitmap_warning_to_shm_capture": {
+          "result": "ok"
+        },
+        "capture::frame::tests::forced_native_backend_ends_session_when_the_graphics_pipeline_never_opens": {
+          "result": "ok"
+        },
+        "capture::frame::tests::forced_native_backend_refuses_non_avc_client_without_bitmap_substitution": {
+          "result": "ok"
+        },
+        "capture::frame::tests::native_failure_disconnects_strict_mode_and_auto_recovers_with_an_idr": {
+          "result": "ok"
+        },
+        "capture::frame::tests::frame_processor_falls_back_after_egfx_activation_timeout": {
+          "result": "ok"
+        },
+        "capture::wayland::dmabuf_capture::tests::dmabuf_egfx_activation_timeout_selects_shm_fallback": {
+          "result": "ok"
+        },
+        "capture::wayland::dmabuf_capture::tests::dmabuf_non_avc_clearcodec_session_selects_shm_without_waiting": {
+          "result": "ok"
+        },
+        "egfx::shared::tests::bitmap_fallback_wait_expires_once_per_connection": {
+          "result": "ok"
+        },
+        "egfx::shared::tests::ready_channel_skips_future_wait_until_new_client": {
+          "result": "ok"
+        }
       },
-      "suites": [{"filter": "capture::", "min_passed": 100}, {"filter": "egfx::", "min_passed": 168}]
+      "suites": [
+        {
+          "filter": "capture::",
+          "min_passed": 175
+        },
+        {
+          "filter": "egfx::",
+          "min_passed": 170
+        }
+      ]
     }
   ]
 }
