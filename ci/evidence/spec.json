@@ -1,26 +1,29 @@
 {
   "cases": [
     {
-      "id": "b3-02-before",
-      "revision": "775a96dca420f11a8e4a23a1462750a76d1e70f7",
-      "cargo": ["--features", "nvenc", "--bin", "hypr-rdp"],
+      "id": "b3-before",
+      "revision": "f9bb4b2fa80243f01caf42e8870224be10722d08",
+      "cargo": ["--features", "nvenc", "--lib"],
       "tests": {
-        "egfx::tests::late_suspend_ack_for_a_frame_before_a_graphics_reset_clears_the_window":
-          {"result": "FAILED", "messages": ["late suspend ACK before the reset cutoff left charges after resume", "  left: 1\n right: 0"]}
+        "nvenc::native::tests::cabac_zero_word_tail_is_kept_for_cabac_slices_and_rejected_for_cavlc":
+          {"result": "FAILED", "messages": ["a CABAC slice may end in cabac_zero_word", "fault: InvalidOutput"]}
       }
     },
     {
-      "id": "b3-02-after",
-      "revision": "fc7767df24fd149d45787783958aa4f28b9ac59e",
-      "cargo": ["--features", "nvenc", "--bin", "hypr-rdp"],
+      "id": "b3-after",
+      "revision": "4b3e427ccaaadd973bac16a560e1f3ccb1cbc2b5",
+      "cargo": ["--features", "nvenc", "--lib"],
       "tests": {
-        "egfx::tests::late_suspend_ack_for_a_frame_before_a_graphics_reset_clears_the_window": {"result": "ok"},
-        "egfx::tests::tracked_queue_policy_honors_client_ack_suspend": {"result": "ok"},
-        "egfx::tests::resize_generation_ignores_stale_frame_ack": {"result": "ok"},
-        "egfx::output_queue_tests::output_queue_frames_sent_while_acks_are_suspended_do_not_charge_after_resume": {"result": "ok"},
-        "egfx::output_queue_tests::output_queue_suspended_ack_bounds_all_codecs_and_resumes_without_ack": {"result": "ok"}
+        "nvenc::native::tests::cabac_zero_word_tail_is_kept_for_cabac_slices_and_rejected_for_cavlc": {"result": "ok"},
+        "nvenc::annexb::tests::final_emulation_byte_is_accepted_only_after_a_cabac_slice_zero_word": {"result": "ok"},
+        "nvenc::annexb::tests::invalid_or_truncated_emulation_sequences_stay_rejected": {"result": "ok"},
+        "nvenc::annexb::tests::encapsulated_rbsp_round_trips": {"result": "ok"},
+        "nvenc::annexb::tests::oversized_coded_geometry_cannot_hide_behind_a_small_display_crop": {"result": "ok"},
+        "nvenc::native::tests::annexb_rejects_bad_boundaries_parameter_sets_geometry_and_idr_mismatch": {"result": "ok"},
+        "nvenc::native::tests::bounded_random_annexb_never_panics": {"result": "ok"},
+        "nvenc::native::tests::uuid_selection_pitch_copy_settings_metadata_and_decode_round_trip": {"result": "ok"}
       },
-      "suites": [{"filter": "egfx::", "min_passed": 168}]
+      "suites": [{"filter": "nvenc::", "min_passed": 90}]
     }
   ]
 }
