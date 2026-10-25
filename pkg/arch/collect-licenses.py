@@ -8,6 +8,14 @@ import sys
 
 metadata = json.loads(Path(sys.argv[1]).read_text())
 destination = Path(sys.argv[2])
+# Upstream texts for crates whose published .crate omits them (see the bundle's
+# repository/commit/sha256 records). Every resolved crate must end with a text.
+supplemental = {}
+for crate in json.loads(Path(sys.argv[3]).read_text())["crates"]:
+    for file in crate["files"]:
+        if hashlib.sha256(file["text"].encode()).hexdigest() != file["sha256"]:
+            raise ValueError(f'supplemental text changed: {crate["name"]} {file["path"]}')
+    supplemental[(crate["name"], crate["version"])] = crate
 destination.mkdir(parents=True, exist_ok=True)
 bundles = {}
 index = []
@@ -47,6 +55,16 @@ for package in sorted(metadata["packages"], key=lambda p: p["id"]):
             files.append(str(Path(identifier) / relative))
         bundles[root] = files
     files = bundles[root]
+    supplement = supplemental.pop((package["name"], package["version"]), None)
+    if not files and supplement:
+        identifier = f'{package["name"]}-{package["version"]}-supplemental'
+        for file in supplement["files"]:
+            output = destination / identifier / file["path"]
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(file["text"])
+            files.append(str(Path(identifier) / file["path"]))
+    elif supplement:
+        raise ValueError(f'supplemental text is redundant: {package["name"]}-{package["version"]}')
     if not files:
         missing.append(f'{package["name"]}-{package["version"]}')
     if package["name"] in critical:
@@ -58,10 +76,16 @@ for package in sorted(metadata["packages"], key=lambda p: p["id"]):
                   "authors": package.get("authors", []), "notices": files})
 if critical:
     raise ValueError(f"critical dependencies absent from metadata: {critical}")
+resolved = {package["name"] for package in metadata["packages"]}
+if drifted := sorted(key for key in supplemental if key[0] in resolved):
+    raise ValueError(f"supplemental texts for other crate versions: {drifted}")
+if supplemental:
+    # Not in this target's resolve (for example a platform-specific crate).
+    print(f"Unused supplemental texts: {sorted(supplemental)}")
 (destination / "index.json").write_text(json.dumps({
-    "scope": "Cargo-resolved dependencies, including build/dev/platform dependencies; not a linked-code inventory or legal opinion",
+    "scope": "Cargo-resolved dependencies for x86_64-unknown-linux-gnu, including build/dev dependencies; not a linked-code inventory or legal opinion",
     "packages": index, "without_packaged_notice_files": missing,
 }, indent=2) + "\n")
-print(f"Preserved notices for {len(index)} resolved packages; {len(missing)} have no standalone notice file (see index)")
+print(f"Preserved notices for {len(index)} resolved packages")
 if missing:
-    print("Without standalone notice files: " + ", ".join(missing))
+    raise ValueError("resolved crates without any license text: " + ", ".join(missing))

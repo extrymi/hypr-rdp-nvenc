@@ -18,8 +18,8 @@ assert re.fullmatch(r"[0-9]{4}/[0-9]{2}/[0-9]{2}", manifest["snapshot"])
 assert "runtime_commit" not in manifest
 assert manifest["rust"] == baseline["rust"]["channel"]
 hashes = shlex.split(re.search(r"sha256sums=\((.*?)\)", text, re.S)[1])
-assert hashes[0] == "SKIP" and len(hashes) == 6
-for name, expected in zip(("hypr-rdp-nvenc.service", "config.example.toml", "hypr-rdp-tls", "arch-package.md", "collect-licenses.py"), hashes[1:]):
+assert hashes[0] == "SKIP" and len(hashes) == 7
+for name, expected in zip(("hypr-rdp-nvenc.service", "config.example.toml", "hypr-rdp-tls", "arch-package.md", "collect-licenses.py", "supplemental-licenses.json"), hashes[1:]):
     assert hashlib.sha256((recipe / name).read_bytes()).hexdigest() == expected, name
 workflow = (root / ".github/workflows/arch-package.yml").read_text()
 actions = re.findall(r"uses:\s*([^\s@]+)@([^\s#]+)", workflow)

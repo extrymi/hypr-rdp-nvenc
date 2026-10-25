@@ -28,8 +28,9 @@ source=(
     'hypr-rdp-tls'
     'arch-package.md'
     'collect-licenses.py'
+    'supplemental-licenses.json'
 )
-sha256sums=('SKIP' 'c23dbe1e716d011ae26a4b49d6f5fa3d97ae5ea88a15b6625a5353dc432f5815' 'e93544b6c1024b76ce3f1b368db2dec43b74734a8a9fb93f21cd3da682e1c3c1' '0e8aef6f35f4387a11277d59c7d71e046e6c7c15a15201daa3c5808af0b7fabe' '1df43436403adf525c055880dcb1f4412535eccd53b3dc15d71f39812bd81f18' '7e318b8cccafe3bdfb013b58d652b9fa02d160f9e7a6e625f524fc3abc47bf44')
+sha256sums=('SKIP' 'c23dbe1e716d011ae26a4b49d6f5fa3d97ae5ea88a15b6625a5353dc432f5815' 'e93544b6c1024b76ce3f1b368db2dec43b74734a8a9fb93f21cd3da682e1c3c1' '0e8aef6f35f4387a11277d59c7d71e046e6c7c15a15201daa3c5808af0b7fabe' '1df43436403adf525c055880dcb1f4412535eccd53b3dc15d71f39812bd81f18' 'f49fb20a5a85ec0f212ba7ddd6655f47f0c590de69dba0af21a294ca727d86cf' 'e3ba6785865e27646d93ef33e2a26d9b4c43c016f1126c77ce08c8fa4b88c66c')
 
 prepare() {
     cd "$srcdir/hypr-rdp"
@@ -45,8 +46,10 @@ build() {
     # Upstream's bundled C codecs do not accept all makepkg linker flags.
     unset CFLAGS CXXFLAGS CPPFLAGS LDFLAGS
     cargo build --frozen --release --features nvenc
-    cargo metadata --frozen --features nvenc --format-version 1 > "$srcdir/cargo-metadata.json"
-    python "$srcdir/collect-licenses.py" "$srcdir/cargo-metadata.json" "$srcdir/dependency-licenses"
+    cargo metadata --frozen --features nvenc --format-version 1 \
+        --filter-platform x86_64-unknown-linux-gnu > "$srcdir/cargo-metadata.json"
+    python "$srcdir/collect-licenses.py" "$srcdir/cargo-metadata.json" "$srcdir/dependency-licenses" \
+        "$srcdir/supplemental-licenses.json"
 }
 
 check() {
