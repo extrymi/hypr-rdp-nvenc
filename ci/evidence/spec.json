@@ -1,32 +1,8 @@
 {
   "cases": [
     {
-      "id": "fdiag2-before-lib",
-      "revision": "637b3e3dfe2fc4cc3d712c39ee95ffa1b719fabe",
-      "cargo": [
-        "--features",
-        "nvenc",
-        "--lib"
-      ],
-      "tests": {
-        "nvenc::annexb::tests::oversized_coded_geometry_cannot_hide_behind_a_small_display_crop": {
-          "result": "FAILED",
-          "messages": [
-            "code: 8",
-            "code: 10"
-          ]
-        },
-        "nvenc::native::tests::annexb_rejects_bad_boundaries_parameter_sets_geometry_and_idr_mismatch": {
-          "result": "ok"
-        },
-        "nvenc::native::tests::cabac_zero_word_tail_is_kept_for_cabac_slices_and_rejected_for_cavlc": {
-          "result": "ok"
-        }
-      }
-    },
-    {
-      "id": "fdiag2-before-bin",
-      "revision": "637b3e3dfe2fc4cc3d712c39ee95ffa1b719fabe",
+      "id": "fdiag2-01-before-bin",
+      "revision": "54bed59340214e3ef06687ab326df8bcb8bf4d01",
       "cargo": [
         "--features",
         "nvenc",
@@ -34,45 +10,19 @@
         "hypr-rdp"
       ],
       "tests": {
-        "capture::frame::tests::dmabuf_activation_timeout_leaves_the_bitmap_warning_to_shm_capture": {
+        "capture::frame::tests::unusable_native_output_ends_capture_in_auto_and_strict_mode": {
           "result": "FAILED",
           "messages": [
             "panicked at src/capture/frame.rs",
-            "the bitmap substitution the user sees must be logged",
-            "falling back from DMA-BUF to SHM capture"
+            "automatic=true",
+            "under a strict backend"
           ]
         }
       }
     },
     {
-      "id": "fdiag2-after-lib",
-      "revision": "2e9e22aa8d673b180194b4c5a9f2cb9bcbbb1897",
-      "cargo": [
-        "--features",
-        "nvenc",
-        "--lib"
-      ],
-      "tests": {
-        "nvenc::annexb::tests::oversized_coded_geometry_cannot_hide_behind_a_small_display_crop": {
-          "result": "ok"
-        },
-        "nvenc::native::tests::annexb_rejects_bad_boundaries_parameter_sets_geometry_and_idr_mismatch": {
-          "result": "ok"
-        },
-        "nvenc::native::tests::cabac_zero_word_tail_is_kept_for_cabac_slices_and_rejected_for_cavlc": {
-          "result": "ok"
-        }
-      },
-      "suites": [
-        {
-          "filter": "nvenc::",
-          "min_passed": 94
-        }
-      ]
-    },
-    {
-      "id": "fdiag2-after-bin",
-      "revision": "2e9e22aa8d673b180194b4c5a9f2cb9bcbbb1897",
+      "id": "fdiag2-01-after-bin",
+      "revision": "cf12411b48e77b9d04859d26b6b1e2fa90d1a47f",
       "cargo": [
         "--features",
         "nvenc",
@@ -80,38 +30,26 @@
         "hypr-rdp"
       ],
       "tests": {
+        "capture::frame::tests::unusable_native_output_ends_capture_in_auto_and_strict_mode": {
+          "result": "ok"
+        },
+        "capture::frame::tests::native_failure_disconnects_strict_mode_and_auto_recovers_with_an_idr": {
+          "result": "ok"
+        },
         "capture::frame::tests::dmabuf_activation_timeout_leaves_the_bitmap_warning_to_shm_capture": {
           "result": "ok"
         },
         "capture::frame::tests::forced_native_backend_ends_session_when_the_graphics_pipeline_never_opens": {
           "result": "ok"
         },
-        "capture::frame::tests::forced_native_backend_refuses_non_avc_client_without_bitmap_substitution": {
-          "result": "ok"
-        },
-        "capture::frame::tests::native_failure_disconnects_strict_mode_and_auto_recovers_with_an_idr": {
-          "result": "ok"
-        },
-        "capture::frame::tests::frame_processor_falls_back_after_egfx_activation_timeout": {
-          "result": "ok"
-        },
-        "capture::wayland::dmabuf_capture::tests::dmabuf_egfx_activation_timeout_selects_shm_fallback": {
-          "result": "ok"
-        },
-        "capture::wayland::dmabuf_capture::tests::dmabuf_non_avc_clearcodec_session_selects_shm_without_waiting": {
-          "result": "ok"
-        },
-        "egfx::shared::tests::bitmap_fallback_wait_expires_once_per_connection": {
-          "result": "ok"
-        },
-        "egfx::shared::tests::ready_channel_skips_future_wait_until_new_client": {
+        "egfx::nvenc::tests::capture_ipc_cpu_encode_decode_and_idr_recovery_preserve_pixels": {
           "result": "ok"
         }
       },
       "suites": [
         {
           "filter": "capture::",
-          "min_passed": 175
+          "min_passed": 176
         },
         {
           "filter": "egfx::",
