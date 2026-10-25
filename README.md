@@ -157,10 +157,11 @@ Run `hypr-rdp --help` for all options.
 | `--pam-service` | PAM service name | `hypr-rdp` |
 | `--capture-mode` | `wlr` or `ext` capture protocol | `wlr` |
 | `--egfx-codec` | `avc420`, experimental `avc444`, `auto`, or `clearcodec` (lossless, damage-only ClearCodec instead of H.264 for EGFX clients) | `avc420` |
-| `--h264-backend` | `auto`, `software`, or `vaapi` | `auto` |
+| `--h264-backend` | `auto`, `software`, `vaapi`, or `nvenc` (requires `--nvenc-device`) | `auto` |
+| `--nvenc-device` | Stable `GPU-…` UUID for native NVENC; with `auto`, NVENC is tried first and may fall back to software | none |
 | `--bitrate` | Video bitrate in bits/s | `10000000` |
 | `--quality` | H.264 quality, 0–51 (lower is better) | `23` |
-| `--rate-control` | `vbr` or `cqp` | `vbr` |
+| `--rate-control` | `vbr`, `cqp`, or NVENC-only `cbr` | `vbr` (`cbr` with an NVENC device) |
 | `--fps` | Maximum frame rate | `30` |
 | `--audio-mode` | `redirect` to RDP, `mirror` local playback, or `off` | `redirect` |
 | `--keyboard-layout-policy` | `client` layout or existing `compositor` keymap | `client` |
