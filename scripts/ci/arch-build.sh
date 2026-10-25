@@ -11,7 +11,8 @@ runuser -u builder -- rustup toolchain install 1.99.1 --profile minimal
 runuser -u builder -- bash -c 'cd /home/builder/recipe; makepkg --cleanbuild --check --noconfirm --log'
 recipe=/home/builder/recipe
 # Provenance names the commit actually built, cross-checked with the single pin.
-runtime_source=$(git -C "$recipe/src/hypr-rdp" rev-parse HEAD)
+# The checkout belongs to builder; git refuses a repository owned by another user.
+runtime_source=$(runuser -u builder -- git -C "$recipe/src/hypr-rdp" rev-parse HEAD)
 [[ $runtime_source == "$(sed -n 's/^_commit=\([0-9a-f]\{40\}\)$/\1/p' "$recipe/PKGBUILD")" ]]
 export RUNTIME_SOURCE=$runtime_source
 nm "$recipe/src/target/release/hypr-rdp" > /out/arch-symbols.txt
