@@ -351,9 +351,25 @@ impl EgfxShared {
         self.frame_ack_suspended
             .store(ack_suspended, Ordering::Release);
 
-        if self.ack_cutoff_active.load(Ordering::Acquire)
-            && frame_id <= self.ack_cutoff_frame_id.load(Ordering::Acquire)
-        {
+        let stale = self.ack_cutoff_active.load(Ordering::Acquire)
+            && frame_id <= self.ack_cutoff_frame_id.load(Ordering::Acquire);
+
+        // IronRDP forwards a suspend, even one naming a frame from before a
+        // graphics reset, only after it stopped tracking every frame in flight.
+        // Empty the local window too; the stale-ACK cutoff must not keep it.
+        if ack_suspended {
+            if !stale {
+                self.last_acked_frame_id.store(frame_id, Ordering::Release);
+            }
+            let queued = self.total_queued_frames.load(Ordering::Acquire);
+            self.total_acked_frames.store(queued, Ordering::Release);
+            self.frames_in_flight.store(0, Ordering::Release);
+            self.frame_ack_stream_established
+                .store(false, Ordering::Release);
+            return;
+        }
+
+        if stale {
             tracing::trace!(
                 frame_id,
                 cutoff = self.ack_cutoff_frame_id.load(Ordering::Acquire),
@@ -363,14 +379,6 @@ impl EgfxShared {
         }
 
         self.last_acked_frame_id.store(frame_id, Ordering::Release);
-        if ack_suspended {
-            let queued = self.total_queued_frames.load(Ordering::Acquire);
-            self.total_acked_frames.store(queued, Ordering::Release);
-            self.frames_in_flight.store(0, Ordering::Release);
-            self.frame_ack_stream_established
-                .store(false, Ordering::Release);
-            return;
-        }
 
         self.frame_ack_stream_established
             .store(true, Ordering::Release);
