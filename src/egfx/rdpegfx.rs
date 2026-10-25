@@ -540,16 +540,14 @@ impl EgfxShared {
             return false;
         };
 
-        let Some(queued) =
-            Self::queue_avc420_rdpegfx_frame(
-                Some(self),
-                handle,
-                surface_id,
-                h264_data,
-                regions,
-                timestamp_ms,
-            )
-        else {
+        let Some(queued) = Self::queue_avc420_rdpegfx_frame(
+            Some(self),
+            handle,
+            surface_id,
+            h264_data,
+            regions,
+            timestamp_ms,
+        ) else {
             return false;
         };
 
