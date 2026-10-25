@@ -2,7 +2,9 @@ name: Arch package lifecycle
 
 on:
   pull_request:
-    branches: [codex/nvenc-server-integration, codex/arch-packaging, main]
+    # Any stacked base, e.g. a packaging PR above a runtime-fix branch. Only
+    # trees that contain this workflow (packaging branches) can trigger it.
+    branches: ['**']
     # No path filter: a runtime change on this branch must reach the pin check.
   workflow_dispatch:
 
