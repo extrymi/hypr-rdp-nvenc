@@ -1845,6 +1845,50 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "vaapi")]
+    #[test]
+    fn dmabuf_activation_timeout_leaves_the_bitmap_warning_to_shm_capture() {
+        use crate::capture::wayland::dmabuf_egfx_activation_timed_out as dmabuf_timed_out;
+        let width = 16;
+        let height = 16;
+        let stride = width * 4;
+        let shared = unnegotiated_egfx_shared(width as u16, height as u16, EgfxCodecPolicy::Auto);
+        let frame = gradient_bgra_frame(width, height, stride);
+        let (display_tx, mut display_rx) = mpsc::channel(4);
+        let mut processor = FrameProcessor::new(
+            Some(Arc::clone(&shared)),
+            width as u32,
+            height as u32,
+            PixelFormat::BgrA32,
+            stride as u32,
+            1_000_000,
+            23,
+            H264RateControl::Vbr,
+            30,
+        );
+
+        let start = Instant::now();
+        let expired = start + GFX_READY_GRACE;
+        let logs = captured_logs(|| {
+            assert!(!dmabuf_timed_out(&shared, false, start));
+            // DMA-BUF capture gives up first and hands the connection to SHM capture.
+            assert!(dmabuf_timed_out(&shared, false, expired));
+            processor.queue_damage(&[(0, 0, width as i32, height as i32)]);
+            assert!(processor.process_at(&frame, &display_tx, expired));
+        });
+
+        assert!(matches!(display_rx.try_recv(), Ok(DisplayUpdate::Bitmap(_))));
+        assert!(
+            logs.contains("sending bitmap updates instead"),
+            "the bitmap substitution the user sees must be logged: {logs}"
+        );
+        assert_eq!(
+            logs.matches("has not opened the graphics pipeline").count(),
+            1,
+            "{logs}"
+        );
+    }
+
     #[test]
     fn frame_processor_delays_initial_resize_until_egfx_channel_ready() {
         let width = 16;

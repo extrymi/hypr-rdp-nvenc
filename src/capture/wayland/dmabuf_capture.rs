@@ -126,7 +126,11 @@ fn dmabuf_capture_decision_result(decision: DmaBufCaptureDecision) -> Result<()>
     }
 }
 
-fn dmabuf_egfx_activation_timed_out(shared: &EgfxShared, ready: bool, now: Instant) -> bool {
+pub(in crate::capture) fn dmabuf_egfx_activation_timed_out(
+    shared: &EgfxShared,
+    ready: bool,
+    now: Instant,
+) -> bool {
     !ready && shared.bitmap_fallback_due(now, "falling back from DMA-BUF to SHM capture")
 }
 

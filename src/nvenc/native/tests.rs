@@ -403,9 +403,11 @@ fn annexb_rejects_bad_boundaries_parameter_sets_geometry_and_idr_mismatch() {
         &[0, 0, 1, 0x65, 0x80],
         &[1, 0, 0, 1, 0x65, 0x80],
     ] {
-        assert!(AnnexB::default()
-            .normalize(bad, 64, 64, true, true)
-            .is_err());
+        assert_eq!(
+            AnnexB::default().normalize(bad, 64, 64, true, true),
+            Err(Error::invalid_output(OutputCheck::AnnexB)),
+            "{bad:02x?}"
+        );
     }
     assert_eq!(
         AnnexB::default().normalize(first, 66, 64, true, true),
@@ -421,18 +423,23 @@ fn annexb_rejects_bad_boundaries_parameter_sets_geometry_and_idr_mismatch() {
         .filter(|n| n[0] & 31 != 8)
         .flat_map(|n| [vec![0, 0, 0, 1], n.to_vec()].concat())
         .collect();
-    assert!(AnnexB::default()
-        .normalize(&without_pps, 64, 64, true, true)
-        .is_err());
-    assert!(AnnexB::default()
-        .normalize(
-            &[first.as_slice(), first.as_slice()].concat(),
-            64,
-            64,
-            true,
-            true
-        )
-        .is_err());
+    assert_eq!(
+        AnnexB::default().normalize(&without_pps, 64, 64, true, true),
+        Err(Error::invalid_output(OutputCheck::AnnexB))
+    );
+    let duplicate = [first.as_slice(), first.as_slice()].concat();
+    assert_eq!(
+        AnnexB::default().normalize(&duplicate, 64, 64, true, true),
+        Err(Error::invalid_output(OutputCheck::AnnexB))
+    );
+    // A requested IDR that comes back as a P picture, with matching driver type.
+    let stream = packets();
+    let mut annexb = AnnexB::default();
+    annexb.normalize(&stream[0], 64, 64, true, true).unwrap();
+    assert_eq!(
+        annexb.normalize(&stream[1], 64, 64, true, false),
+        Err(Error::invalid_output(OutputCheck::IdrAgreement))
+    );
 }
 
 /// Structural-only fixture: OpenH264 emits CAVLC. Setting the PPS entropy flag
@@ -479,9 +486,10 @@ fn cabac_zero_word_tail_is_kept_for_cabac_slices_and_rejected_for_cavlc() {
         .any(|nal| nal[0] & 31 == 5 && nal.ends_with(&[0, 0, 3])));
     // 7.3.2.10: cabac_zero_word exists only when entropy_coding_mode_flag is 1.
     let cavlc = with_entropy_flag_and_zero_word(first, false);
-    assert!(AnnexB::default()
-        .normalize(&cavlc, 64, 64, true, true)
-        .is_err());
+    assert_eq!(
+        AnnexB::default().normalize(&cavlc, 64, 64, true, true),
+        Err(Error::invalid_output(OutputCheck::EmulationPrevention))
+    );
 }
 
 proptest::proptest! {

@@ -399,7 +399,11 @@ mod tests {
             &b"\x67\x42\x00\x29\xf4\x00\x20\x01\x3c\x00\x3f\xc3\xa0"[..],
             &b"\x67\x42\x00\x29\xf4\x04\x04\xf0\x1c\x3a"[..],
         ] {
-            assert!(super::sps(nal).is_err());
+            assert_eq!(
+                super::sps(nal),
+                Err(super::Error::invalid_output(super::OutputCheck::Geometry)),
+                "{nal:02x?}"
+            );
         }
     }
 
