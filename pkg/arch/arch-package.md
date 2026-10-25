@@ -34,10 +34,12 @@ compiler/package provenance and lifecycle logs. Packages are not signed releases
 compare the artifact's recorded hash before installing a downloaded package.
 Build provenance is recorded, not a claim of bit-for-bit reproducible binaries.
 CI may reuse a checked package build only for the same recipe/source files,
-toolchain/image/snapshot pins, builder script and PAM probe. Output hashes are
-checked after restore, and ARCH-BUILD-PROVENANCE.json identifies the originating
-run. Lifecycle tests always use a newly prepared runtime root. No Cargo target
-cache or workstation state is reused.
+toolchain/image/snapshot pins, builder script, PAM probe and workflow file.
+Output hashes are checked after restore. ARCH-BUILD-PROVENANCE.json identifies
+the originating run and the runtime commit it built; a reused build also gets
+ARCH-BUILD-REUSE.json, which states that build and tests were not re-executed.
+Lifecycle tests always use a newly prepared runtime root. No Cargo target cache
+or workstation state is reused.
 
 ## Install, without automatic activation
 
@@ -64,10 +66,16 @@ API 13.1 needs driver 610+; a version number alone does not prove encoder caps.
 CUDA toolkit and FFmpeg are not required by this backend.
 
 Original MIT and NVIDIA interface-header notices are retained. Dependency notice
-files are copied from the exact Cargo-resolved sources, including nested native
-library notices for OpenH264, AWS-LC and ring. The dependency-licenses/index.json
-records source/version/SPDX fields and any crates without standalone notices;
-it includes build/dev/platform dependencies and is not a legal compliance opinion.
+files are copied from the exact Cargo-resolved sources of the
+x86_64-unknown-linux-gnu graph (`cargo metadata --filter-platform`), including
+nested native library notices for OpenH264, AWS-LC and ring. A crate whose
+published `.crate` omits its licence text gets the upstream text listed in
+`supplemental-licenses.json`, pinned by commit and SHA-256. The
+dependency-licenses/index.json records source/version/SPDX fields and lists
+crates left without a packaged notice; it covers that graph's build and dev
+dependencies and is not a legal compliance opinion. Open item: libva-sys and
+openh264-sys2 ship only a nested native-library notice, which currently counts
+as their notice.
 
 ## Configure the existing desktop
 
