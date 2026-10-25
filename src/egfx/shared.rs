@@ -210,6 +210,18 @@ impl EgfxShared {
     /// Returns true after the bounded activation wait has expired. The caller
     /// names what it does then; that consequence is logged once.
     pub(crate) fn bitmap_fallback_due(&self, now: Instant, consequence: &'static str) -> bool {
+        self.activation_wait_expired(now, Some(consequence))
+    }
+
+    /// The same deadline without the one-shot warning: DMA-BUF capture logs
+    /// its own fallback, and SHM capture still owes the warning about what it
+    /// sends instead.
+    #[cfg(feature = "vaapi")]
+    pub(crate) fn dmabuf_fallback_due(&self, now: Instant) -> bool {
+        self.activation_wait_expired(now, None)
+    }
+
+    fn activation_wait_expired(&self, now: Instant, consequence: Option<&'static str>) -> bool {
         if self.gfx_ever_ready.load(Ordering::Acquire) {
             return true;
         }
@@ -223,6 +235,9 @@ impl EgfxShared {
         }
         drop(started);
 
+        let Some(consequence) = consequence else {
+            return true;
+        };
         if !self.gfx_fallback_logged.swap(true, Ordering::AcqRel) {
             tracing::warn!(
                 waited_ms = waited.as_millis(),

@@ -182,9 +182,11 @@ pub enum OutputCheck {
     AnnexB = 8,
     /// Forbidden or misplaced emulation prevention sequence.
     EmulationPrevention = 9,
-    /// Coded geometry differs from the configured size.
+    /// SPS size: the displayed size differs from the configured size, or the
+    /// coded size is out of bounds.
     Geometry = 10,
-    /// Slices and driver picture type disagree about IDR.
+    /// Slices and driver picture type disagree about IDR, or the slices of a
+    /// requested IDR are not IDR.
     IdrAgreement = 11,
     /// Engine bounds: empty or oversized unit, or a requested IDR is missing.
     EngineOutput = 12,

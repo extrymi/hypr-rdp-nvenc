@@ -376,7 +376,7 @@ fn sps(nal: &[u8]) -> Result<(u32, u32, u32), Error> {
     // A tiny displayed crop must not hide an oversized coded allocation from
     // the decoder; bound coded dimensions as well as the displayed dimensions.
     if w > 8192 || h > 8192 || crop_x >= 16 || crop_y >= 16 {
-        return Err(invalid());
+        return Err(refused(OutputCheck::Geometry));
     }
     let width = w
         .checked_sub(crop_x)

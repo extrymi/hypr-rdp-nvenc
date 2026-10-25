@@ -940,11 +940,15 @@ impl FrameProcessor {
                             );
                         }
                         Some(Ok(_)) => {
-                            if !self.h264_backend.allows_software()
-                                || self.h264_encoder.as_ref().is_some_and(|e| e.is_nvenc())
-                            {
+                            let native = self.h264_encoder.as_ref().is_some_and(|e| e.is_nvenc());
+                            if native || !self.h264_backend.allows_software() {
+                                let source = if native {
+                                    "Native NVENC"
+                                } else {
+                                    "The strict H.264 backend"
+                                };
                                 tracing::error!(
-                                    "H.264 encoder produced no usable output under a strict backend; ending capture session"
+                                    "{source} produced no usable output; ending capture session"
                                 );
                                 return false;
                             }
