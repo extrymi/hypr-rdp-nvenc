@@ -33,6 +33,8 @@ pub(in crate::egfx) struct QueuedRdpegfxFrame {
     pub(in crate::egfx) frame_id: u32,
     pub(in crate::egfx) dvc_messages: Vec<DvcMessage>,
     pub(in crate::egfx) channel_id: u32,
+    /// The local window was charged under the server lock for this frame.
+    pub(in crate::egfx) charged: bool,
 }
 
 #[derive(Default)]
@@ -207,13 +209,17 @@ impl EgfxShared {
                 bitmap_data: rect.data,
             })
             .collect();
+        let tracked_before = server.frames_in_flight();
         let Some(frame_id) = server.send_mixed_frame(surface_id, tiles, timestamp_ms) else {
             anyhow::bail!("ClearCodec frame rejected after encode");
         };
+        // IronRDP does not track frames while the client suspends ACKs.
+        let tracked = server.frames_in_flight() > tracked_before;
         let queued = QueuedRdpegfxFrame {
             frame_id,
             channel_id,
             dvc_messages: server.drain_output(),
+            charged: false,
         };
         if !Self::send_rdpegfx_dvc_messages(sender, queued, lease, "ClearCodec", "clearcodec") {
             anyhow::bail!("ClearCodec transport closed after encode");
@@ -221,7 +227,10 @@ impl EgfxShared {
         // Keep the server lock until local accounting exists, so an ACK callback
         // cannot overtake the enqueue and be lost from the local window.
         state.commit();
-        self.record_frame_queued(frame_id);
+        if tracked {
+            self.reserve_frame_in_flight();
+        }
+        self.commit_frame_queued(frame_id);
         tracing::debug!(
             frame_id,
             surface_id,
@@ -532,22 +541,29 @@ impl EgfxShared {
         };
 
         let Some(queued) =
-            Self::queue_avc420_rdpegfx_frame(handle, surface_id, h264_data, regions, timestamp_ms)
+            Self::queue_avc420_rdpegfx_frame(
+                Some(self),
+                handle,
+                surface_id,
+                h264_data,
+                regions,
+                timestamp_ms,
+            )
         else {
             return false;
         };
 
-        let frame_id = queued.frame_id;
-        // Charge the window before the transport can see the frame. Its ACK
-        // runs under the GraphicsPipelineServer lock, which queue_rdpegfx_frame
-        // has already released, so a later charge could lose that ACK.
-        self.reserve_frame_in_flight();
+        // queue_rdpegfx_frame charged the window under the server lock if
+        // IronRDP tracks the frame; its ACK may run as soon as it is sent.
+        let (frame_id, charged) = (queued.frame_id, queued.charged);
         if Self::send_rdpegfx_dvc_messages(sender, queued, lease, "AVC420", "avc420_rdpegfx_frame")
         {
             self.commit_frame_queued(frame_id);
             true
         } else {
-            self.release_unsent_frame();
+            if charged {
+                self.release_unsent_frame();
+            }
             false
         }
     }
@@ -583,6 +599,7 @@ impl EgfxShared {
         };
 
         let Some(queued) = Self::queue_avc444_rdpegfx_frame(
+            Some(self),
             handle,
             surface_id,
             send_encoding,
@@ -595,22 +612,23 @@ impl EgfxShared {
             return false;
         };
 
-        let frame_id = queued.frame_id;
-        // Charge the window before the transport can see the frame. Its ACK
-        // runs under the GraphicsPipelineServer lock, which queue_rdpegfx_frame
-        // has already released, so a later charge could lose that ACK.
-        self.reserve_frame_in_flight();
+        // queue_rdpegfx_frame charged the window under the server lock if
+        // IronRDP tracks the frame; its ACK may run as soon as it is sent.
+        let (frame_id, charged) = (queued.frame_id, queued.charged);
         if Self::send_rdpegfx_dvc_messages(sender, queued, lease, "AVC444", "avc444_rdpegfx_frame")
         {
             self.commit_frame_queued(frame_id);
             true
         } else {
-            self.release_unsent_frame();
+            if charged {
+                self.release_unsent_frame();
+            }
             false
         }
     }
 
     pub(in crate::egfx) fn queue_avc420_rdpegfx_frame(
+        window: Option<&EgfxShared>,
         handle: &GfxServerHandle,
         surface_id: u16,
         h264_data: &[u8],
@@ -622,7 +640,7 @@ impl EgfxShared {
             return None;
         }
 
-        Self::queue_rdpegfx_frame(handle, "avc420_rdpegfx_frame", |server| {
+        Self::queue_rdpegfx_frame(window, handle, "avc420_rdpegfx_frame", |server| {
             server
                 .send_avc420_frame(surface_id, h264_data, regions, timestamp_ms)
                 .or_else(|| {
@@ -634,6 +652,7 @@ impl EgfxShared {
 
     #[allow(clippy::too_many_arguments)]
     pub(in crate::egfx) fn queue_avc444_rdpegfx_frame(
+        window: Option<&EgfxShared>,
         handle: &GfxServerHandle,
         surface_id: u16,
         encoding: Encoding,
@@ -643,7 +662,7 @@ impl EgfxShared {
         stream2_regions: Option<&[Avc420Region]>,
         timestamp_ms: u32,
     ) -> Option<QueuedRdpegfxFrame> {
-        Self::queue_rdpegfx_frame(handle, "avc444_rdpegfx_frame", |server| {
+        Self::queue_rdpegfx_frame(window, handle, "avc444_rdpegfx_frame", |server| {
             server
                 .send_avc444v2_frame(
                     surface_id,
@@ -661,12 +680,14 @@ impl EgfxShared {
         })
     }
 
+    /// `window`: the local frame window to charge, `None` for untracked sends.
     pub(in crate::egfx) fn queue_rdpegfx_frame(
+        window: Option<&EgfxShared>,
         handle: &GfxServerHandle,
         trace_name: &'static str,
         queue_frame: impl FnOnce(&mut GraphicsPipelineServer) -> Option<u32>,
     ) -> Option<QueuedRdpegfxFrame> {
-        let (frame_id, dvc_messages, channel_id) = {
+        let (frame_id, dvc_messages, channel_id, charged) = {
             let Ok(mut server) = handle.lock() else {
                 return None;
             };
@@ -691,14 +712,25 @@ impl EgfxShared {
                 }
             };
 
+            let tracked_before = server.frames_in_flight();
             let frame_id = queue_frame(&mut server)?;
             let dvc_messages = server.drain_output();
-            (frame_id, dvc_messages, channel_id)
+            if dvc_messages.is_empty() {
+                return None;
+            }
+            // FrameAcknowledge, graphics resets and ACK suspension change
+            // IronRDP's tracking of this frame only under this lock. Charge here,
+            // and only for a frame IronRDP tracks, so its later ACK or reset
+            // always meets the charge.
+            let charged = window.is_some_and(|window| {
+                let tracked = server.frames_in_flight() > tracked_before;
+                if tracked {
+                    window.reserve_frame_in_flight();
+                }
+                tracked
+            });
+            (frame_id, dvc_messages, channel_id, charged)
         };
-
-        if dvc_messages.is_empty() {
-            return None;
-        }
 
         #[cfg(test)]
         AFTER_QUEUE.with_borrow_mut(|hook| {
@@ -711,6 +743,7 @@ impl EgfxShared {
             frame_id,
             dvc_messages,
             channel_id,
+            charged,
         })
     }
 

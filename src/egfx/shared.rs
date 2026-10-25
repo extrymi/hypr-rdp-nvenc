@@ -308,13 +308,15 @@ impl EgfxShared {
         (queued >= max).then_some(EgfxFrameReadiness::OutputBackpressure { queued, max })
     }
 
+    #[cfg(test)]
     pub(in crate::egfx) fn record_frame_queued(&self, frame_id: u32) {
         self.reserve_frame_in_flight();
         self.commit_frame_queued(frame_id);
     }
 
-    /// Charge the local window before the transport can see a frame: the
-    /// IronRDP task may process its FrameAcknowledge as soon as it is sent.
+    /// Charge the local window for a frame IronRDP tracks. Called under the
+    /// GraphicsPipelineServer lock, before the transport can see the frame:
+    /// the IronRDP task may process its FrameAcknowledge as soon as it is sent.
     pub(in crate::egfx) fn reserve_frame_in_flight(&self) {
         self.frames_in_flight.fetch_add(1, Ordering::AcqRel);
     }

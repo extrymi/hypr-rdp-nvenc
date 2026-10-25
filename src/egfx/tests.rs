@@ -229,6 +229,7 @@ fn avc420_rdpegfx_queue_emits_logical_frame_wire_shape() {
 
     let regions = [Avc420Region::new(4, 6, 20, 22, 19, 81)];
     let queued = EgfxShared::queue_avc420_rdpegfx_frame(
+        None,
         &handle,
         surface_id,
         &[0, 0, 1, 0x65, 0xaa, 0xbb],
@@ -566,7 +567,9 @@ fn tracked_queue_policy_honors_client_ack_suspend() {
         &regions,
         125,
     ));
-    assert_eq!(shared.frames_in_flight(), 2);
+    // IronRDP does not track frames while ACKs are suspended and would never
+    // forward their ACKs after resume, so they do not charge the window.
+    assert_eq!(shared.frames_in_flight(), 0);
     assert!(shared.can_send_frame(&handle));
 }
 
@@ -629,6 +632,7 @@ fn avc444v2_rdpegfx_queue_emits_logical_frame_wire_shape() {
     let stream2_regions = [Avc420Region::new(16, 8, 64, 48, 22, 78)];
 
     let queued = EgfxShared::queue_avc444_rdpegfx_frame(
+        None,
         &handle,
         surface_id,
         Encoding::LUMA_AND_CHROMA,
@@ -829,6 +833,7 @@ fn avc444_rdpegfx_queue_maps_luma_and_chroma_to_wire_payload() {
     let stream2_regions = [Avc420Region::new(16, 8, 64, 48, 22, 78)];
 
     let queued = EgfxShared::queue_avc444_rdpegfx_frame(
+        None,
         &handle,
         surface_id,
         Encoding::LUMA_AND_CHROMA,
@@ -881,6 +886,7 @@ fn avc444_rdpegfx_queue_allows_empty_h264_payloads_with_regions() {
     let stream2_regions = [Avc420Region::new(16, 8, 64, 48, 22, 78)];
 
     let queued = EgfxShared::queue_avc444_rdpegfx_frame(
+        None,
         &handle,
         surface_id,
         Encoding::LUMA_AND_CHROMA,
@@ -915,6 +921,7 @@ fn avc444_rdpegfx_queue_maps_luma_only_and_chroma_only_to_stream1() {
         let (handle, surface_id) = ready_avc444_handle(64, 64);
         let regions = [Avc420Region::new(4, 6, 20, 22, 18, 82)];
         let queued = EgfxShared::queue_avc444_rdpegfx_frame(
+            None,
             &handle,
             surface_id,
             wire_encoding,
