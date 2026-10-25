@@ -46,7 +46,7 @@ def check_test(base, name, expect, log):
     if expect["result"] == "FAILED":
         if proc.returncode != 101:
             problems.append(f"exit {proc.returncode} != 101 (libtest failure)")
-        missing = [m for m in expect.get("messages", []) if m not in proc.stdout]
+        missing = [m for m in expect.get("messages", []) if m not in proc.stdout + proc.stderr]
         if missing:
             problems.append(f"missing assertion text {missing}")
     elif proc.returncode != 0:

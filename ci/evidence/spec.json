@@ -1,29 +1,33 @@
 {
   "cases": [
     {
-      "id": "b3-before",
-      "revision": "f9bb4b2fa80243f01caf42e8870224be10722d08",
-      "cargo": ["--features", "nvenc", "--lib"],
+      "id": "a1-before",
+      "revision": "52b8d8ade6ca5c39173c48799455c3a8a56832fa",
+      "cargo": ["--features", "nvenc", "--bin", "hypr-rdp"],
       "tests": {
-        "nvenc::native::tests::cabac_zero_word_tail_is_kept_for_cabac_slices_and_rejected_for_cavlc":
-          {"result": "FAILED", "messages": ["a CABAC slice may end in cabac_zero_word", "fault: InvalidOutput"]}
+        "egfx::nvenc::tests::self_exec_paths_survive_replacement_of_the_running_executable":
+          {"result": "FAILED", "messages": ["self-exec after replacement", "(deleted)", "assertion failed: status.success()"]}
       }
     },
     {
-      "id": "b3-after",
-      "revision": "4b3e427ccaaadd973bac16a560e1f3ccb1cbc2b5",
-      "cargo": ["--features", "nvenc", "--lib"],
+      "id": "a1-after",
+      "revision": "fcc69a4ee00ff821310cfd27833062be7fcb6138",
+      "cargo": ["--features", "nvenc", "--bin", "hypr-rdp"],
       "tests": {
-        "nvenc::native::tests::cabac_zero_word_tail_is_kept_for_cabac_slices_and_rejected_for_cavlc": {"result": "ok"},
-        "nvenc::annexb::tests::final_emulation_byte_is_accepted_only_after_a_cabac_slice_zero_word": {"result": "ok"},
-        "nvenc::annexb::tests::invalid_or_truncated_emulation_sequences_stay_rejected": {"result": "ok"},
-        "nvenc::annexb::tests::encapsulated_rbsp_round_trips": {"result": "ok"},
-        "nvenc::annexb::tests::oversized_coded_geometry_cannot_hide_behind_a_small_display_crop": {"result": "ok"},
-        "nvenc::native::tests::annexb_rejects_bad_boundaries_parameter_sets_geometry_and_idr_mismatch": {"result": "ok"},
-        "nvenc::native::tests::bounded_random_annexb_never_panics": {"result": "ok"},
-        "nvenc::native::tests::uuid_selection_pitch_copy_settings_metadata_and_decode_round_trip": {"result": "ok"}
+        "egfx::nvenc::tests::self_exec_paths_survive_replacement_of_the_running_executable": {"result": "ok"},
+        "egfx::nvenc::tests::capture_ipc_cpu_encode_decode_and_idr_recovery_preserve_pixels": {"result": "ok"},
+        "server::auth::pam::tests::pam_helper_cancellation_kills_process_group": {"result": "ok"}
       },
-      "suites": [{"filter": "nvenc::", "min_passed": 90}]
+      "suites": [{"filter": "egfx::nvenc::", "min_passed": 3}, {"filter": "server::auth::", "min_passed": 5}]
+    },
+    {
+      "id": "a1-after-worker-entry",
+      "revision": "fcc69a4ee00ff821310cfd27833062be7fcb6138",
+      "cargo": ["--features", "nvenc", "--test", "nvenc_entry"],
+      "tests": {
+        "private_worker_rejects_missing_marker_socket_and_extra_arguments": {"result": "ok"},
+        "actual_worker_sends_hello_and_exits_without_init_or_desktop": {"result": "ok"}
+      }
     }
   ]
 }
