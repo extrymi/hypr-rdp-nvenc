@@ -1,15 +1,16 @@
 # hypr-rdp
 
 Fork development: the optional NVIDIA worker/AVC420 backend is described in
-[docs/nvenc-integration.md](docs/nvenc-integration.md). It remains hardware and
-client unqualified; this stage performs no workstation installation.
+[docs/nvenc-integration.md](docs/nvenc-integration.md). It needs a build with
+`--features nvenc` and remains hardware and client unqualified.
 
 Development fork: NVIDIA support is under construction. The current changes are
 documented in [NVENC development](docs/nvenc-development.md) and
 [startup validation](docs/startup-validation.md). CPU CI artifacts are not a
 deployment release or a qualified NVIDIA build. Installation examples below
 describe upstream. The experimental fork package, explicit setup and removal are
-documented in [Arch package](pkg/arch/arch-package.md); real hardware/client
+documented in `pkg/arch/arch-package.md` on the packaging branch, installed as
+`/usr/share/doc/hypr-rdp-nvenc/arch-package.md`; real hardware/client
 qualification remains open.
 
 Native RDP server for Hyprland.
@@ -157,8 +158,8 @@ Run `hypr-rdp --help` for all options.
 | `--pam-service` | PAM service name | `hypr-rdp` |
 | `--capture-mode` | `wlr` or `ext` capture protocol | `wlr` |
 | `--egfx-codec` | `avc420`, experimental `avc444`, `auto`, or `clearcodec` (lossless, damage-only ClearCodec instead of H.264 for EGFX clients) | `avc420` |
-| `--h264-backend` | `auto`, `software`, `vaapi`, or `nvenc` (requires `--nvenc-device`) | `auto` |
-| `--nvenc-device` | Stable `GPU-…` UUID for native NVENC; with `auto`, NVENC is tried first and may fall back to software | none |
+| `--h264-backend` | `auto`, `software`, `vaapi`, or `nvenc` (`--features nvenc` builds; requires `--nvenc-device`) | `auto` |
+| `--nvenc-device` | Stable `GPU-…` UUID for native NVENC (`--features nvenc` builds); with `auto`, NVENC is tried first and may fall back to software | none |
 | `--bitrate` | Video bitrate in bits/s | `10000000` |
 | `--quality` | H.264 quality, 0–51 (lower is better) | `23` |
 | `--rate-control` | `vbr`, `cqp`, or NVENC-only `cbr` | `vbr` (`cbr` with an NVENC device) |

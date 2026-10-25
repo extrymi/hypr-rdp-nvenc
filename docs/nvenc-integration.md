@@ -107,15 +107,17 @@ fails until that worker is gone (normally a reboot); do not delete its record
 argv[0] `hypr-rdp`: their process name (comm, journald `_COMM`) is `exe`, and
 `pgrep -f hypr-rdp` finds them.
 
-Follow the package's `arch-package.md`: stop `hypr-rdp-nvenc.service` before a
-package change and start it again after preflight. If a running service is
+Follow `/usr/share/doc/hypr-rdp-nvenc/arch-package.md`: stop
+`hypr-rdp-nvenc.service` before a package change and start it again after
+preflight. If a running service is
 upgraded anyway, its workers and PAM helpers still execute the old image
 (`/proc/self/exe`) but load the current shared libraries and PAM configuration;
 restart it (`systemctl --user restart hypr-rdp-nvenc.service`) after upgrading
 this package or its libraries. Reboot after an NVIDIA driver upgrade: new
 workers load the new userspace driver while the old kernel module is still
 loaded, which is expected to fail NVENC initialization (not tested on
-hardware). Strict mode then ends each new connection. Auto mode with an
+hardware). Strict mode then ends the connection whenever a new worker starts
+(new connection, resize or renegotiation). Auto mode with an
 `nvenc_device` falls back to software only if the driver reports an error and
 the worker exits; a hang or crash ends the connection.
 
@@ -131,9 +133,9 @@ others in the listen backlog; the X.224/TLS handshake has no deadline, so one
 silent or half-open connection blocks every other client. In `configured` mode
 a newcomer that authenticates within 10 s replaces the current connection,
 including a silent one. In `pam` mode the packaged PAM service includes Arch's
-`system-auth`, which also runs `pam_faillock` for sudo and login. Whether remote
-failures from the helper (it runs as the desktop user) count toward that local
-lockout is not tested.
+`system-auth`, which also runs `pam_faillock` for sudo and login. Remote
+failures may count toward that local lockout of the desktop user; this is not
+tested.
 
 ## CPU evidence and open gates
 
@@ -151,7 +153,8 @@ a kernel/GPU fault on a shared device. DMA-BUF/CUDA import is a separate stage.
 
 ## Rollback
 
-For the package, follow the upgrade and rollback steps in `arch-package.md`.
+For the package, follow the upgrade and rollback steps in
+`/usr/share/doc/hypr-rdp-nvenc/arch-package.md`.
 Without changing packages, choose `h264_backend="software"` and remove
 `nvenc_device`/CBR; the software path does not probe the GPU. Do not delete a
 live worker record to force recovery. Package lifecycle is exercised only in a
