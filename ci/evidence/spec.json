@@ -3,30 +3,85 @@
     {
       "id": "a1-before",
       "revision": "52b8d8ade6ca5c39173c48799455c3a8a56832fa",
-      "cargo": ["--features", "nvenc", "--bin", "hypr-rdp"],
+      "cargo": [
+        "--features",
+        "nvenc",
+        "--bin",
+        "hypr-rdp"
+      ],
       "tests": {
-        "egfx::nvenc::tests::self_exec_paths_survive_replacement_of_the_running_executable":
-          {"result": "FAILED", "messages": ["self-exec after replacement", "(deleted)", "assertion failed: status.success()"]}
+        "egfx::nvenc::tests::self_exec_paths_survive_replacement_of_the_running_executable": {
+          "result": "FAILED",
+          "messages": [
+            "self-exec after replacement",
+            "(deleted)",
+            "assertion failed: status.success()"
+          ]
+        }
       }
     },
     {
       "id": "a1-after",
       "revision": "fcc69a4ee00ff821310cfd27833062be7fcb6138",
-      "cargo": ["--features", "nvenc", "--bin", "hypr-rdp"],
+      "cargo": [
+        "--features",
+        "nvenc",
+        "--bin",
+        "hypr-rdp"
+      ],
       "tests": {
-        "egfx::nvenc::tests::self_exec_paths_survive_replacement_of_the_running_executable": {"result": "ok"},
-        "egfx::nvenc::tests::capture_ipc_cpu_encode_decode_and_idr_recovery_preserve_pixels": {"result": "ok"},
-        "server::auth::pam::tests::pam_helper_cancellation_kills_process_group": {"result": "ok"}
+        "egfx::nvenc::tests::self_exec_paths_survive_replacement_of_the_running_executable": {
+          "result": "ok"
+        },
+        "egfx::nvenc::tests::capture_ipc_cpu_encode_decode_and_idr_recovery_preserve_pixels": {
+          "result": "ok"
+        },
+        "server::auth::pam::tests::pam_helper_cancellation_kills_process_group": {
+          "result": "ok"
+        }
       },
-      "suites": [{"filter": "egfx::nvenc::", "min_passed": 3}, {"filter": "server::auth::", "min_passed": 5}]
+      "suites": [
+        {
+          "filter": "egfx::nvenc::",
+          "min_passed": 3
+        },
+        {
+          "filter": "server::auth::",
+          "min_passed": 5
+        }
+      ]
     },
     {
       "id": "a1-after-worker-entry",
       "revision": "fcc69a4ee00ff821310cfd27833062be7fcb6138",
-      "cargo": ["--features", "nvenc", "--test", "nvenc_entry"],
+      "cargo": [
+        "--features",
+        "nvenc",
+        "--test",
+        "nvenc_entry"
+      ],
       "tests": {
-        "private_worker_rejects_missing_marker_socket_and_extra_arguments": {"result": "ok"},
-        "actual_worker_sends_hello_and_exits_without_init_or_desktop": {"result": "ok"}
+        "private_worker_rejects_missing_marker_socket_and_extra_arguments": {
+          "result": "ok"
+        },
+        "actual_worker_sends_hello_and_exits_without_init_or_desktop": {
+          "result": "ok"
+        }
+      }
+    },
+    {
+      "id": "a1-after-fmt",
+      "revision": "ad92f3fa502825f4c749a1787ea089767cb1325c",
+      "cargo": [
+        "--features",
+        "nvenc",
+        "--bin",
+        "hypr-rdp"
+      ],
+      "tests": {
+        "egfx::nvenc::tests::self_exec_paths_survive_replacement_of_the_running_executable": {
+          "result": "ok"
+        }
       }
     }
   ]

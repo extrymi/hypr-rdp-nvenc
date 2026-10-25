@@ -38,8 +38,11 @@ def check_test(base, name, expect, log):
     proc = run(base + ["--", "--exact", name], log)
     outcome = re.findall(rf"^test {re.escape(name)} \.\.\. (ok|FAILED)$", proc.stdout, re.M)
     totals = summary(proc.stdout)
+    # Fixtures that run copies of the test binary print their own summaries
+    # first; the selecting harness prints the last one.
+    final = totals[-1] if totals else None
     problems = []
-    if len(outcome) != 1 or len(totals) != 1 or totals[0][1] + totals[0][2] != 1:
+    if len(outcome) != 1 or final is None or final[1] + final[2] != 1:
         problems.append(f"expected exactly one selected run, got outcome={outcome} totals={totals}")
     elif outcome[0] != expect["result"]:
         problems.append(f"result {outcome[0]} != expected {expect['result']}")
@@ -52,7 +55,8 @@ def check_test(base, name, expect, log):
     elif proc.returncode != 0:
         problems.append(f"exit {proc.returncode} != 0")
     return {"test": name, "expected": expect["result"], "observed": outcome[0] if outcome else None,
-            "exit": proc.returncode, "valid": not problems, "problems": problems, "log": log.name}
+            "exit": proc.returncode, "nested_summaries": max(len(totals) - 1, 0),
+            "valid": not problems, "problems": problems, "log": log.name}
 
 
 def check_suite(base, suite, log):
