@@ -1,19 +1,39 @@
 {
   "cases": [
     {
-      "id": "b1-after-v2",
-      "revision": "7c72ab0f4149cbe41ec85315076ba50c0f2af20b",
+      "id": "b1-v3-before",
+      "revision": "1bf9d12bf170826674a8da48cae9b498ffa52f72",
       "cargo": ["--features", "nvenc", "--bin", "hypr-rdp"],
       "tests": {
+        "egfx::tests::avc420_caps_readvertise_after_queue_leaves_no_phantom_charge":
+          {"result": "FAILED", "messages": ["AVC420 CapsAdvertise after queue left a phantom charge", "  left: 1\n right: 0"]},
+        "egfx::tests::avc444_caps_readvertise_after_queue_leaves_no_phantom_charge":
+          {"result": "FAILED", "messages": ["AVC444 CapsAdvertise after queue left a phantom charge", "  left: 1\n right: 0"]},
+        "egfx::tests::avc420_resize_after_queue_leaves_no_phantom_charge":
+          {"result": "FAILED", "messages": ["resize after queue left a phantom charge", "  left: 1\n right: 0"]},
+        "egfx::output_queue_tests::output_queue_frames_sent_while_acks_are_suspended_do_not_charge_after_resume":
+          {"result": "FAILED", "messages": ["ClearCodec: suspended frames left charges after resume", "  left: 3\n right: 0"]},
+        "egfx::tests::rejected_publication_leaves_no_local_charge": {"result": "ok"}
+      }
+    },
+    {
+      "id": "b1-v3-after",
+      "revision": "e7ee051b9f67a1225ed0cda57cc86592abe3b759",
+      "cargo": ["--features", "nvenc", "--bin", "hypr-rdp"],
+      "tests": {
+        "egfx::tests::avc420_caps_readvertise_after_queue_leaves_no_phantom_charge": {"result": "ok"},
+        "egfx::tests::avc444_caps_readvertise_after_queue_leaves_no_phantom_charge": {"result": "ok"},
+        "egfx::tests::avc420_resize_after_queue_leaves_no_phantom_charge": {"result": "ok"},
+        "egfx::output_queue_tests::output_queue_frames_sent_while_acks_are_suspended_do_not_charge_after_resume": {"result": "ok"},
+        "egfx::tests::rejected_publication_leaves_no_local_charge": {"result": "ok"},
         "egfx::tests::avc420_ack_inside_publication_window_releases_local_window": {"result": "ok"},
         "egfx::tests::avc444_ack_inside_publication_window_releases_local_window": {"result": "ok"},
-        "egfx::tests::rejected_publication_leaves_no_local_charge": {"result": "ok"},
         "egfx::output_queue_tests::output_queue_closed_receiver_releases_slots": {"result": "ok"},
-        "egfx::tests::tracked_frame_ack_releases_local_queue_depth": {"result": "ok"},
+        "egfx::output_queue_tests::output_queue_suspended_ack_bounds_all_codecs_and_resumes_without_ack": {"result": "ok"},
         "egfx::tests::tracked_queue_policy_honors_client_ack_suspend": {"result": "ok"},
-        "egfx::tests::reset_for_new_client_clears_negotiated_state_and_frame_queue": {"result": "ok"}
+        "egfx::tests::resize_generation_ignores_stale_frame_ack": {"result": "ok"}
       },
-      "suites": [{"filter": "egfx::", "min_passed": 163}]
+      "suites": [{"filter": "egfx::", "min_passed": 167}]
     }
   ]
 }

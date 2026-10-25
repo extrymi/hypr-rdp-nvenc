@@ -18,8 +18,12 @@ def git(*args):
     return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout.strip()
 
 
-def run(command, log):
-    proc = subprocess.run(command, capture_output=True, text=True)
+def run(command, log, timeout=1800):
+    try:
+        proc = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired as expired:
+        log.write_text(f"$ {' '.join(command)}\nTIMEOUT after {timeout}s\n{expired.stdout or ''}")
+        return subprocess.CompletedProcess(command, 124, expired.stdout or "", expired.stderr or "")
     log.write_text(f"$ {' '.join(command)}\nexit={proc.returncode}\n"
                    f"--- stdout ---\n{proc.stdout}\n--- stderr ---\n{proc.stderr}")
     return proc
