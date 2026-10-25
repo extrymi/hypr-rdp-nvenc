@@ -305,7 +305,10 @@ fn fixture_self_exec_parent() {
     let worker = super::worker_command().unwrap();
     let programs = [
         ("NVENC worker", worker.as_std().get_program().to_owned()),
-        ("PAM helper resolved at start", helper_at_start.into_os_string()),
+        (
+            "PAM helper resolved at start",
+            helper_at_start.into_os_string(),
+        ),
         (
             "PAM helper resolved now",
             crate::server::auth::helper_executable()
@@ -327,7 +330,9 @@ fn fixture_self_exec_parent() {
         {
             Ok(output) => output,
             Err(error) => {
-                failures.push(format!("{role}: spawn {program:?} after replacement: {error}"));
+                failures.push(format!(
+                    "{role}: spawn {program:?} after replacement: {error}"
+                ));
                 continue;
             }
         };
@@ -341,7 +346,10 @@ fn fixture_self_exec_parent() {
             ));
         }
     }
-    assert!(failures.is_empty(), "self-exec after replacement: {failures:#?}");
+    assert!(
+        failures.is_empty(),
+        "self-exec after replacement: {failures:#?}"
+    );
 }
 
 #[test]
