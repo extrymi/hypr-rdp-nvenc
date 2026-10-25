@@ -2231,3 +2231,45 @@ fn avc420_resize_after_queue_leaves_no_phantom_charge() {
     let bridge = std::cell::RefCell::new(bridge);
     assert_no_charge_after_reset(&shared, &bridge, frame_id, "resize");
 }
+
+#[test]
+fn late_suspend_ack_for_a_frame_before_a_graphics_reset_clears_the_window() {
+    let (shared, mut bridge, handle, surface_id, event_tx, mut event_rx) =
+        ready_tracked_avc420_session(64, 64, DEFAULT_MAX_FRAMES_IN_FLIGHT);
+    let _ = drain_gfx_pdus(&mut event_rx);
+    let regions = [Avc420Region::new(0, 0, 64, 64, 21, 79)];
+    let send = |surface_id, value| {
+        assert!(shared.send_tracked_avc420_rdpegfx_frame(
+            &handle,
+            &event_tx,
+            surface_id,
+            &[0, 0, 1, 0x65, value],
+            &regions,
+            u32::from(value),
+        ));
+        shared.frame_flow_snapshot().last_queued_frame_id
+    };
+    let before_reset = send(surface_id, 1);
+    let _ = drain_gfx_pdus(&mut event_rx);
+    // The unacknowledged frame becomes the stale-ACK cutoff of the reset.
+    process_avc420_capabilities(&mut bridge);
+    let surface_id = shared
+        .init_or_reuse_surface(&handle, &event_tx, 64, 64)
+        .expect("surface after reset");
+    let _ = drain_gfx_pdus(&mut event_rx);
+    let after_reset = [send(surface_id, 2), send(surface_id, 3)];
+    let _ = drain_gfx_pdus(&mut event_rx);
+    assert_eq!(shared.frames_in_flight(), 2);
+    // IronRDP accepts a late suspend for an issued frame and drops its tracking
+    // of the frames after the reset; only the first resuming ACK is forwarded.
+    ack_frame(&mut bridge, before_reset, QueueDepth::Suspend);
+    for frame_id in after_reset {
+        ack_frame(&mut bridge, frame_id, QueueDepth::AvailableBytes(8));
+    }
+    assert_eq!(
+        shared.frames_in_flight(),
+        0,
+        "late suspend ACK before the reset cutoff left charges after resume"
+    );
+    assert!(shared.full_frame_refresh_readiness().is_ready());
+}
