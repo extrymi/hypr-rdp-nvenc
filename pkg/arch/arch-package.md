@@ -21,8 +21,8 @@ Rust 1.99.1 is the tested toolchain. With rustup, install that toolchain on the
 builder first. A distro Rust installation must provide the same compatible
 compiler; the recipe does not download/install a toolchain or bypass pacman.
 `prepare()` fetches locked Cargo dependencies; build/check use `--frozen`.
-Runtime source is pinned to phase-5 commit
-`fd4b702b7e7454d98eda0d155a75c4b0c56c2092`. Local unit/template/helper/doc sources
+Runtime source is pinned to the CPU-tested runtime commit
+`a7420471d711aea20dc5e311361142d2490da414`. Local unit/template/helper/doc sources
 have SHA-256 checksums. Git is pinned to a full commit (its checksum is SKIP, as
 usual for makepkg VCS sources). No floating runtime branch is built. A later
 runtime change requires updating that explicit pin and retesting the package.
@@ -45,7 +45,7 @@ Deployment on the workstation remains a separate acceptance step. When a test
 machine is available, select one exact inspected package file:
 
 ```sh
-sudo pacman -U ./hypr-rdp-nvenc-0.1.7.nvenc1-1-x86_64.pkg.tar.zst
+sudo pacman -U ./hypr-rdp-nvenc-0.1.7.nvenc2-1-x86_64.pkg.tar.zst
 ```
 
 It conflicts with upstream hypr-rdp/hypr-rdp-git, shares the executable name and

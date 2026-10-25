@@ -7,7 +7,9 @@ printf 'Server = https://archive.archlinux.org/repos/%s/$repo/os/$arch\n' "$ARCH
 sed -i '/^[[:space:]]*NoExtract[[:space:]]*=/d' /etc/pacman.conf
 # Fresh root: no compiler or build dependencies can hide missing runtime linkage.
 pacman -Syu --noconfirm --needed systemd dbus python iproute2
-pacman -U --noconfirm /out/hypr-rdp-nvenc-0.1.7.nvenc1-1-x86_64.pkg.tar.zst
+packages=(/out/hypr-rdp-nvenc-*-1-x86_64.pkg.tar.zst)
+[[ ${#packages[@]} == 1 && -f ${packages[0]} ]]
+pacman -U --noconfirm "${packages[0]}"
 pacman -Q > /out/arch-runtime-packages.txt
 ldd /usr/bin/hypr-rdp | tee /out/arch-runtime-linkage.txt
 ! grep -q 'not found' /out/arch-runtime-linkage.txt

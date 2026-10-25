@@ -13,8 +13,17 @@ UNIT = "hypr-rdp-nvenc.service"
 HOME = Path("/home/tester")
 CONFIG = HOME / ".config/hypr-rdp"
 OUT = Path("/out")
-V1 = OUT / "hypr-rdp-nvenc-0.1.7.nvenc1-1-x86_64.pkg.tar.zst"
-V2 = OUT / "hypr-rdp-nvenc-0.1.7.nvenc1-2-x86_64.pkg.tar.zst"
+
+
+def built(release):
+    """The one package revision the checked build produced; its version comes from PKGBUILD."""
+    found = sorted(OUT.glob(f"hypr-rdp-nvenc-*-{release}-x86_64.pkg.tar.zst"))
+    assert len(found) == 1, found
+    return found[0]
+
+
+V1, V2 = built(1), built(2)
+VERSION = V1.name.removeprefix("hypr-rdp-nvenc-").removesuffix("-1-x86_64.pkg.tar.zst")
 CHECKS = []
 
 
@@ -227,7 +236,7 @@ config_hashes = {name: digest(CONFIG / name) for name in ("config.toml", "passwo
 pam_path = Path("/etc/pam.d/hypr-rdp")
 pam_path.write_text(pam_path.read_text() + "# administrator fixture retained by pacman\n")
 pam_hash = digest(pam_path)
-for package, version in ((V2, "0.1.7.nvenc1-2"), (V1, "0.1.7.nvenc1-1")):
+for package, version in ((V2, f"{VERSION}-2"), (V1, f"{VERSION}-1")):
     run("pacman", "-U", "--noconfirm", package)
     check_owners()
     assert run("pacman", "-Q", "hypr-rdp-nvenc").stdout.strip().endswith(version)

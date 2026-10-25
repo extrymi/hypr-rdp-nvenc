@@ -1,6 +1,6 @@
 # NVIDIA fork; upstream authors and MIT notices are retained in the source.
 pkgname=hypr-rdp-nvenc
-pkgver=0.1.7.nvenc1
+pkgver=0.1.7.nvenc2
 pkgrel=1
 pkgdesc='RDP server for an existing Hyprland session with optional native NVIDIA encoding (experimental)'
 arch=('x86_64')
@@ -17,9 +17,10 @@ optdepends=(
     'intel-media-driver: VA-API encoding on Intel'
     'libva-mesa-driver: VA-API encoding on AMD'
 )
-# Source runtime was already qualified on CPU in phase 5. Packaging files below
-# are separate checked sources, so this recipe does not need its own commit SHA.
-_commit=fd4b702b7e7454d98eda0d155a75c4b0c56c2092
+# The runtime commit passed the CPU CI baseline before it was pinned here.
+# Packaging files below are separate checked sources, so this recipe does not
+# need its own commit SHA.
+_commit=a7420471d711aea20dc5e311361142d2490da414
 source=(
     "hypr-rdp::git+https://github.com/extrymi/hypr-rdp-nvenc.git#commit=$_commit"
     'hypr-rdp-nvenc.service'
@@ -28,7 +29,7 @@ source=(
     'arch-package.md'
     'collect-licenses.py'
 )
-sha256sums=('SKIP' 'c23dbe1e716d011ae26a4b49d6f5fa3d97ae5ea88a15b6625a5353dc432f5815' 'e93544b6c1024b76ce3f1b368db2dec43b74734a8a9fb93f21cd3da682e1c3c1' '0e8aef6f35f4387a11277d59c7d71e046e6c7c15a15201daa3c5808af0b7fabe' '3ff0b097b536c66f13d45c9047d782c14ee6c38f7c1728e260e78f72424a7290' '7e318b8cccafe3bdfb013b58d652b9fa02d160f9e7a6e625f524fc3abc47bf44')
+sha256sums=('SKIP' 'c23dbe1e716d011ae26a4b49d6f5fa3d97ae5ea88a15b6625a5353dc432f5815' 'e93544b6c1024b76ce3f1b368db2dec43b74734a8a9fb93f21cd3da682e1c3c1' '0e8aef6f35f4387a11277d59c7d71e046e6c7c15a15201daa3c5808af0b7fabe' '1df43436403adf525c055880dcb1f4412535eccd53b3dc15d71f39812bd81f18' '7e318b8cccafe3bdfb013b58d652b9fa02d160f9e7a6e625f524fc3abc47bf44')
 
 prepare() {
     cd "$srcdir/hypr-rdp"
