@@ -10,6 +10,10 @@ chown -R builder:builder /home/builder/recipe
 runuser -u builder -- rustup toolchain install 1.99.1 --profile minimal
 runuser -u builder -- bash -c 'cd /home/builder/recipe; makepkg --cleanbuild --check --noconfirm --log'
 recipe=/home/builder/recipe
+# Provenance names the commit actually built, cross-checked with the single pin.
+runtime_source=$(git -C "$recipe/src/hypr-rdp" rev-parse HEAD)
+[[ $runtime_source == "$(sed -n 's/^_commit=\([0-9a-f]\{40\}\)$/\1/p' "$recipe/PKGBUILD")" ]]
+export RUNTIME_SOURCE=$runtime_source
 nm "$recipe/src/target/release/hypr-rdp" > /out/arch-symbols.txt
 if grep -q hypr_mock_ /out/arch-symbols.txt; then
     echo 'CPU mock symbols in production executable' >&2; exit 1
@@ -43,7 +47,7 @@ from pathlib import Path
 root = Path('/out')
 (root / 'ARCH-BUILD-PROVENANCE.json').write_text(json.dumps({
     'run_id': os.environ['GITHUB_RUN_ID'], 'tested_merge': os.environ['GITHUB_SHA'],
-    'runtime_source': 'a7420471d711aea20dc5e311361142d2490da414',
+    'runtime_source': os.environ['RUNTIME_SOURCE'],
 }, indent=2) + '\n')
 files = [p for p in sorted(root.iterdir()) if p.is_file() and p.name not in {'arch-build.log', 'ARCH-BUILD-SHA256SUMS'}]
 (root / 'ARCH-BUILD-SHA256SUMS').write_text(''.join(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n' for p in files))
