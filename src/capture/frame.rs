@@ -1881,7 +1881,10 @@ mod tests {
             assert!(processor.process_at(&frame, &display_tx, expired));
         });
 
-        assert!(matches!(display_rx.try_recv(), Ok(DisplayUpdate::Bitmap(_))));
+        assert!(matches!(
+            display_rx.try_recv(),
+            Ok(DisplayUpdate::Bitmap(_))
+        ));
         assert!(
             logs.contains("sending bitmap updates instead"),
             "the bitmap substitution the user sees must be logged: {logs}"
