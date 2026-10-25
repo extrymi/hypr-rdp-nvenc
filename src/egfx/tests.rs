@@ -1,7 +1,8 @@
 use super::factory::{capability_avc_support, preferred_capabilities_for_policy};
 use super::test_support::{
     ack_frame, assert_wire_to_surface_frame, decode_avc444_wire_to_surface, decode_gfx_output,
-    drain_gfx_pdus, negotiated_avc420_session, ready_avc420_session, ready_avc444_handle,
+    drain_gfx_pdus, negotiated_avc420_session, process_avc420_capabilities,
+    process_avc444_capabilities, ready_avc420_session, ready_avc444_handle,
     ready_tracked_avc420_session, tracked_avc444_session, unnegotiated_egfx_session,
     TestGfxSession, TEST_CHANNEL_ID,
 };
@@ -2082,6 +2083,7 @@ fn rejected_publication_leaves_no_local_charge() {
     let _ = drain_gfx_pdus(&mut event_rx);
     drop(event_rx);
     let regions = [Avc420Region::new(0, 0, 64, 64, 21, 79)];
+    let before = shared.frame_flow_snapshot();
     assert!(!shared.send_tracked_avc420_rdpegfx_frame(
         &handle,
         &event_tx,
@@ -2090,6 +2092,135 @@ fn rejected_publication_leaves_no_local_charge() {
         &regions,
         123,
     ));
-    let flow = shared.frame_flow_snapshot();
-    assert_eq!((flow.frames_in_flight, flow.total_queued_frames), (0, 0));
+    assert_eq!(shared.frame_flow_snapshot(), before);
+}
+
+/// Installs the post-queue hook for one test and always removes it.
+struct QueueHook;
+
+impl QueueHook {
+    fn install(hook: impl FnMut(u32) + 'static) -> Self {
+        super::rdpegfx::AFTER_QUEUE.with_borrow_mut(|slot| *slot = Some(Box::new(hook)));
+        Self
+    }
+}
+
+impl Drop for QueueHook {
+    fn drop(&mut self) {
+        super::rdpegfx::AFTER_QUEUE.with_borrow_mut(|slot| *slot = None);
+    }
+}
+
+/// IronRDP discarded the frame with a graphics reset in the window after
+/// queueing, so its ACK is ignored. No local charge may remain for it.
+fn assert_no_charge_after_reset(
+    shared: &EgfxShared,
+    bridge: &std::cell::RefCell<ironrdp_server::GfxDvcBridge>,
+    frame_id: u32,
+    reset: &str,
+) {
+    ack_frame(
+        &mut bridge.borrow_mut(),
+        frame_id,
+        QueueDepth::AvailableBytes(8),
+    );
+    assert_eq!(
+        shared.frames_in_flight(),
+        0,
+        "{reset} after queue left a phantom charge"
+    );
+    assert!(shared.full_frame_refresh_readiness().is_ready(), "{reset}");
+}
+
+#[test]
+fn avc420_caps_readvertise_after_queue_leaves_no_phantom_charge() {
+    let (shared, bridge, handle, surface_id, event_tx, mut event_rx) =
+        ready_tracked_avc420_session(64, 64, DEFAULT_MAX_FRAMES_IN_FLIGHT);
+    let _ = drain_gfx_pdus(&mut event_rx);
+    let regions = [Avc420Region::new(0, 0, 64, 64, 21, 79)];
+    let bridge = std::rc::Rc::new(std::cell::RefCell::new(bridge));
+    let queued = std::rc::Rc::new(std::cell::Cell::new(None));
+    let _hook = {
+        let (bridge, queued) = (std::rc::Rc::clone(&bridge), std::rc::Rc::clone(&queued));
+        // mstsc decoder recovery: a mid-session CapsAdvertise waiting for the
+        // server lock runs as soon as queue_rdpegfx_frame releases it.
+        QueueHook::install(move |frame_id| {
+            process_avc420_capabilities(&mut bridge.borrow_mut());
+            queued.set(Some(frame_id));
+        })
+    };
+    assert!(shared.send_tracked_avc420_rdpegfx_frame(
+        &handle,
+        &event_tx,
+        surface_id,
+        &[0, 0, 1, 0x65, 0xaa],
+        &regions,
+        123,
+    ));
+    let frame_id = queued.get().expect("hook ran after queueing");
+    assert_no_charge_after_reset(&shared, &bridge, frame_id, "AVC420 CapsAdvertise");
+}
+
+#[test]
+fn avc444_caps_readvertise_after_queue_leaves_no_phantom_charge() {
+    let TestGfxSession {
+        shared,
+        bridge,
+        handle,
+        event_tx,
+        mut event_rx,
+    } = tracked_avc444_session(64, 64, DEFAULT_MAX_FRAMES_IN_FLIGHT);
+    let surface_id = EgfxShared::init_surface(&handle, &event_tx, 64, 64).expect("surface init");
+    let _ = drain_gfx_pdus(&mut event_rx);
+    let regions = [Avc420Region::new(0, 0, 64, 64, 21, 79)];
+    let bridge = std::rc::Rc::new(std::cell::RefCell::new(bridge));
+    let queued = std::rc::Rc::new(std::cell::Cell::new(None));
+    let _hook = {
+        let (bridge, queued) = (std::rc::Rc::clone(&bridge), std::rc::Rc::clone(&queued));
+        QueueHook::install(move |frame_id| {
+            process_avc444_capabilities(&mut bridge.borrow_mut());
+            queued.set(Some(frame_id));
+        })
+    };
+    assert!(shared.send_tracked_avc444_rdpegfx_frame(
+        &handle,
+        &event_tx,
+        surface_id,
+        Avc444FrameEncoding::Luma,
+        &[0, 0, 1, 0x65, 0xaa],
+        &regions,
+        None,
+        None,
+        123,
+    ));
+    let frame_id = queued.get().expect("hook ran after queueing");
+    assert_no_charge_after_reset(&shared, &bridge, frame_id, "AVC444 CapsAdvertise");
+}
+
+#[test]
+fn avc420_resize_after_queue_leaves_no_phantom_charge() {
+    let (shared, bridge, handle, surface_id, event_tx, mut event_rx) =
+        ready_tracked_avc420_session(64, 64, DEFAULT_MAX_FRAMES_IN_FLIGHT);
+    let _ = drain_gfx_pdus(&mut event_rx);
+    let regions = [Avc420Region::new(0, 0, 64, 64, 21, 79)];
+    let queued = std::rc::Rc::new(std::cell::Cell::new(None));
+    let _hook = {
+        let (resizer, queued) = (Arc::clone(&shared), std::rc::Rc::clone(&queued));
+        // The display thread resizes between queueing and local accounting.
+        QueueHook::install(move |frame_id| {
+            resizer.prepare_for_resize(64, 64);
+            queued.set(Some(frame_id));
+        })
+    };
+    assert!(shared.send_tracked_avc420_rdpegfx_frame(
+        &handle,
+        &event_tx,
+        surface_id,
+        &[0, 0, 1, 0x65, 0xaa],
+        &regions,
+        123,
+    ));
+    let frame_id = queued.get().expect("hook ran after queueing");
+    let bridge = std::cell::RefCell::new(bridge);
+    assert_no_charge_after_reset(&shared, &bridge, frame_id, "resize");
 }

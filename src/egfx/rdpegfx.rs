@@ -21,6 +21,12 @@ thread_local! {
     /// process its FrameAcknowledge on the IronRDP task inside this window.
     pub(in crate::egfx) static AFTER_PUBLISH: std::cell::RefCell<Option<PublishHookFn>> =
         const { std::cell::RefCell::new(None) };
+
+    /// Test seam: runs on the sending thread right after queue_rdpegfx_frame
+    /// released the server lock. The IronRDP task may process a graphics reset,
+    /// close or ACK suspension inside this window.
+    pub(in crate::egfx) static AFTER_QUEUE: std::cell::RefCell<Option<PublishHookFn>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 pub(in crate::egfx) struct QueuedRdpegfxFrame {
@@ -693,6 +699,13 @@ impl EgfxShared {
         if dvc_messages.is_empty() {
             return None;
         }
+
+        #[cfg(test)]
+        AFTER_QUEUE.with_borrow_mut(|hook| {
+            if let Some(hook) = hook.as_mut() {
+                hook(frame_id);
+            }
+        });
 
         Some(QueuedRdpegfxFrame {
             frame_id,
