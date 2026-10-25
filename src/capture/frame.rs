@@ -1309,6 +1309,69 @@ mod tests {
             drop(root);
         }
     }
+
+    #[cfg(feature = "nvenc")]
+    #[test]
+    fn unusable_native_output_ends_capture_in_auto_and_strict_mode() {
+        // AutoNvenc first: before FDIAG-02 its log blamed a strict backend.
+        for automatic in [true, false] {
+            let (encoder, root) = crate::egfx::nvenc_test_encoder(false);
+            let device = "GPU-01234567-89ab-cdef-0123-456789abcdef".parse().unwrap();
+            let policy = if automatic {
+                H264BackendPolicy::AutoNvenc(device)
+            } else {
+                H264BackendPolicy::Nvenc(device)
+            };
+            let (shared, mut bridge, _handle, _sender, mut events) =
+                crate::egfx::test_support::negotiated_avc420_session(
+                    64,
+                    64,
+                    DEFAULT_MAX_FRAMES_IN_FLIGHT,
+                );
+            let (tx, mut bitmaps) = mpsc::channel(4);
+            let mut proc = FrameProcessor::new_with_h264_backend(
+                Some(Arc::clone(&shared)),
+                64,
+                64,
+                PixelFormat::RgbX32,
+                256,
+                1_000_000,
+                23,
+                H264RateControl::Cbr,
+                30,
+                policy,
+            );
+            proc.egfx_ready = true;
+            proc.egfx_generation = shared.generation();
+            proc.egfx_codec = Some(EgfxCodec::Avc420);
+            proc.h264_encoder = Some(crate::egfx::FrameEncoder::Nvenc(Box::new(encoder)));
+            proc.queue_damage(&[(0, 0, 64, 64)]);
+            let mut red = [255, 0, 0, 255].repeat(64 * 64);
+            assert!(proc.process(&red, &tx));
+            assert!(drain_gfx_pdus(&mut events)
+                .as_slice()
+                .iter()
+                .any(|p| matches!(p, ironrdp_egfx::pdu::GfxPdu::WireToSurface1(_))));
+            ack_frame(
+                &mut bridge,
+                shared.frame_flow_snapshot().last_queued_frame_id,
+                TestQueueDepth::AvailableBytes(0),
+            );
+            // A nearly unchanged picture: the CPU oracle returns the raw P
+            // picture of a few bytes, which is not a sendable AVC420 frame.
+            red[0] ^= 1;
+            proc.queue_damage(&[(0, 0, 64, 64)]);
+            let logs = captured_logs(|| assert!(!proc.process(&red, &tx)));
+            assert!(
+                logs.contains("Native NVENC produced no usable output"),
+                "automatic={automatic}: {logs}"
+            );
+            drain_gfx_pdus(&mut events).assert_no_encoded_frame();
+            assert!(bitmaps.try_recv().is_err());
+            drop(proc);
+            drop(root);
+        }
+    }
     use crate::capture::scale::prepare_presentation_frame;
     use crate::display::geometry::{PresentationGeometry, Size};
     use crate::egfx::test_support::{
