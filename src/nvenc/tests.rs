@@ -175,7 +175,7 @@ fn empty_output_or_missing_requested_idr_ends_generation() {
         let mut engine = Engine::new(FakeDriver::new(scenario), config()).unwrap();
         assert_eq!(
             engine.encode(frame(0, &[0; 24])),
-            Err(Error::backend(Phase::Encode, Fault::InvalidOutput))
+            Err(Error::invalid_output(OutputCheck::EngineOutput))
         );
         assert_eq!(engine.encode(frame(1, &[0; 24])), Err(Error::Closed));
     }

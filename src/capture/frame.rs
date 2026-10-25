@@ -1114,6 +1114,67 @@ impl FrameProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Runs `f` with a thread-local subscriber and returns its formatted events.
+    fn captured_logs(f: impl FnOnce()) -> String {
+        #[derive(Clone)]
+        struct Captured(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+        impl std::io::Write for Captured {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let buffer = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let writer = Captured(std::sync::Arc::clone(&buffer));
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(move || writer.clone())
+            .finish();
+        tracing::subscriber::with_default(subscriber, f);
+        let output = String::from_utf8(buffer.lock().unwrap().clone()).unwrap();
+        output
+    }
+
+    #[test]
+    fn forced_native_backend_ends_session_when_the_graphics_pipeline_never_opens() {
+        let shared = crate::egfx::test_support::unnegotiated_egfx_shared(
+            64,
+            64,
+            crate::egfx::EgfxCodecPolicy::Avc420,
+        );
+        let (tx, mut rx) = mpsc::channel(4);
+        let device = "GPU-01234567-89ab-cdef-0123-456789abcdef".parse().unwrap();
+        let mut proc = FrameProcessor::new_with_h264_backend(
+            Some(shared),
+            64,
+            64,
+            PixelFormat::BgrA32,
+            256,
+            1_000_000,
+            23,
+            H264RateControl::Cbr,
+            30,
+            H264BackendPolicy::Nvenc(device),
+        );
+        let start = Instant::now();
+        proc.queue_damage(&[(0, 0, 64, 64)]);
+        let frame = [0; 64 * 64 * 4];
+        let logs = captured_logs(|| {
+            assert!(proc.process_at(&frame, &tx, start));
+            let expired = start + crate::egfx::GFX_READY_GRACE;
+            assert!(!proc.process_at(&frame, &tx, expired));
+        });
+        assert!(rx.try_recv().is_err());
+        assert!(logs.contains("the graphics pipeline is not open"), "{logs}");
+        assert!(logs.contains("the strict H.264 backend ends the session"), "{logs}");
+        assert!(!logs.contains("sending bitmap updates instead"), "{logs}");
+    }
+
     #[test]
     fn forced_native_backend_refuses_non_avc_client_without_bitmap_substitution() {
         let (shared, mut events) = negotiated_no_avc_egfx(64, 64);
@@ -1132,9 +1193,11 @@ mod tests {
             H264BackendPolicy::Nvenc(device),
         );
         proc.queue_damage(&[(0, 0, 64, 64)]);
-        assert!(!proc.process(&[0; 64 * 64 * 4], &tx));
+        let logs = captured_logs(|| assert!(!proc.process(&[0; 64 * 64 * 4], &tx)));
         assert!(rx.try_recv().is_err());
         drain_gfx_pdus(&mut events).assert_no_encoded_frame();
+        assert!(logs.contains("did not negotiate AVC"), "{logs}");
+        assert!(logs.contains("ends the capture session"), "{logs}");
     }
     #[cfg(feature = "nvenc")]
     #[test]

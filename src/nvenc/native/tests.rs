@@ -14,7 +14,7 @@ use openh264::{
 use super::{driver::NativeDriver, ffi::*, loader::Api};
 use crate::nvenc::{
     annexb::{split, AnnexB},
-    Config, Driver, Engine, Error, Fault, Frame, Phase, Stamp,
+    Config, Driver, Engine, Error, Fault, Frame, OutputCheck, Phase, Stamp,
 };
 
 extern "C" {
@@ -236,17 +236,29 @@ fn unsupported_formats_unbounded_counts_and_null_success_handles_fail_closed() {
 
 #[test]
 fn output_failures_always_unlock_and_never_forward_invalid_or_stale_data() {
-    for mode in [2, 3, 4, 5, 8] {
+    for (mode, check) in [
+        (2, OutputCheck::Timestamp),
+        (3, OutputCheck::BitstreamSize),
+        (4, OutputCheck::BitstreamPointer),
+        (5, OutputCheck::InputMapping),
+        (8, OutputCheck::PictureType),
+        (14, OutputCheck::EncodeStatus),
+        (15, OutputCheck::FrameIndex),
+    ] {
         let fixture = Fixture::new(mode, "", 0);
         fixture.packet(&packets()[0]);
         let mut engine = Engine::new(fixture.driver(), config()).unwrap();
-        assert!(engine
-            .encode(frame(
+        // Each refusal names its check; the fault stays InvalidOutput, so the
+        // fallback and quarantine policy do not change.
+        assert_eq!(
+            engine.encode(frame(
                 &vec![0x42; config().frame_bytes().unwrap()],
                 0,
                 false
-            ))
-            .is_err());
+            )),
+            Err(Error::invalid_output(check)),
+            "mode {mode}"
+        );
         drop(engine);
         let trace = fixture.trace();
         let lock = if mode == 5 { "input" } else { "output" };
@@ -395,12 +407,14 @@ fn annexb_rejects_bad_boundaries_parameter_sets_geometry_and_idr_mismatch() {
             .normalize(bad, 64, 64, true, true)
             .is_err());
     }
-    assert!(AnnexB::default()
-        .normalize(first, 66, 64, true, true)
-        .is_err());
-    assert!(AnnexB::default()
-        .normalize(first, 64, 64, true, false)
-        .is_err());
+    assert_eq!(
+        AnnexB::default().normalize(first, 66, 64, true, true),
+        Err(Error::invalid_output(OutputCheck::Geometry))
+    );
+    assert_eq!(
+        AnnexB::default().normalize(first, 64, 64, true, false),
+        Err(Error::invalid_output(OutputCheck::IdrAgreement))
+    );
     let without_pps: Vec<u8> = split(first)
         .unwrap()
         .iter()

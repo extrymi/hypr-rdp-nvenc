@@ -24,7 +24,9 @@ pub use entry::{dispatch_worker, WORKER_ARGUMENT};
 pub use lease::DeviceLease;
 pub use policy::{plan, software_fallback_allowed, BackendMode, DeviceClass, Plan};
 pub use supervisor::{serve, Deadlines, Worker, WORKER_FD};
-pub use types::{AccessUnit, Config, DeviceId, EncodedFrame, Error, Fault, Frame, Phase, Stamp};
+pub use types::{
+    AccessUnit, Config, DeviceId, EncodedFrame, Error, Fault, Frame, OutputCheck, Phase, Stamp,
+};
 
 /// Allocated buffers are separate from the single accepted frame in flight.
 pub const BUFFER_COUNT: usize = 4;
