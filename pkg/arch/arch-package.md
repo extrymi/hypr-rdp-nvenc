@@ -22,7 +22,7 @@ builder first. A distro Rust installation must provide the same compatible
 compiler; the recipe does not download/install a toolchain or bypass pacman.
 `prepare()` fetches locked Cargo dependencies; build/check use `--frozen`.
 Runtime source is pinned to the CPU-tested runtime commit
-`c92f95f43fb822cf9bc19642acb4b1256b65a8c7`. Local unit/template/helper/doc sources
+`c321351d578bb5c6ecc38ccf0dc87a5b63e10c04`. Local unit/template/helper/doc sources
 have SHA-256 checksums. Git is pinned to a full commit (its checksum is SKIP, as
 usual for makepkg VCS sources). No floating runtime branch is built. A later
 runtime change requires updating that explicit pin and retesting the package.
@@ -47,7 +47,7 @@ Deployment on the workstation remains a separate acceptance step. When a test
 machine is available, select one exact inspected package file:
 
 ```sh
-sudo pacman -U ./hypr-rdp-nvenc-0.1.7.nvenc2-1-x86_64.pkg.tar.zst
+sudo pacman -U ./hypr-rdp-nvenc-0.1.7.nvenc3-1-x86_64.pkg.tar.zst
 ```
 
 It conflicts with upstream hypr-rdp/hypr-rdp-git, shares the executable name and
