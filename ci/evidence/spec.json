@@ -1,8 +1,8 @@
 {
   "cases": [
     {
-      "id": "c6-before-config",
-      "revision": "ddc68e903ce5d658ae93ae9b63d28285a8c46bf4",
+      "id": "c6-after-config",
+      "revision": "fc419fe67d7bf0ea33d75366f499a48ec4366654",
       "cargo": [
         "--features",
         "nvenc",
@@ -11,24 +11,28 @@
       ],
       "tests": {
         "config::tests::args_debug_redacts_passwords": {
-          "result": "FAILED",
-          "messages": [
-            "Debug must redact configured passwords"
-          ]
+          "result": "ok"
         },
         "config::tests::config_file_debug_redacts_passwords": {
-          "result": "FAILED",
-          "messages": [
-            "Debug must redact configured passwords"
-          ]
+          "result": "ok"
         },
         "config::tests::configured_credentials_debug_redacts_passwords": {
-          "result": "FAILED",
-          "messages": [
-            "Debug must redact configured passwords"
-          ]
+          "result": "ok"
+        },
+        "config::tests::debug_preserves_absent_passwords": {
+          "result": "ok"
         }
-      }
+      },
+      "suites": [
+        {
+          "filter": "config::",
+          "min_passed": 63
+        },
+        {
+          "filter": "server::auth::tests::",
+          "min_passed": 2
+        }
+      ]
     }
   ]
 }
