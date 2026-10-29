@@ -105,7 +105,7 @@
    "commit": "7cf11db3aae7b38309d9beb2ddaca3d3483fc1d9",
    "facts": [
     "The .crate contains no licence file.",
-    "The repository tree at this commit, and at master 5f3637e2a2e4eead27f21816c050a6a9064ad52e (checked 2026-10-29), contains only openh264-sys2/upstream/LICENSE (Cisco).",
+    "The repository tree at this commit, and at master 5f3637e2a2e4eead27f21816c050a6a9064ad52e (checked 2026-10-29), has two licence files: openh264-sys2/upstream/LICENSE (Cisco's BSD-2-Clause for the OpenH264 C library) and openh264-sys2/tests/reference/BINARY_LICENSE.txt (Cisco's licence for its own prebuilt OpenH264 binaries, which this package does not ship). Neither is a licence text for the wrapper.",
     "README.md L178 at this commit: 'Wrapper code is [BSD-2](https://opensource.org/licenses/BSD-2-Clause), Ralf Biedert.' No licence text, year or copyright line is published."
    ],
    "status": "No verified text exists, so none is shipped or reconstructed. Distribution is blocked until the owner decides (OWNER-DECISIONS §3)."
@@ -117,8 +117,8 @@
    "repository": "https://github.com/ralfbiedert/openh264-rs",
    "commit": "b8c508d223c9cc2c40dc9c27508b7b321c8e44f0",
    "facts": [
-    "The .crate's only notice is upstream/LICENSE, the Cisco licence of the vendored OpenH264 C library; it is kept as a nested notice.",
-    "The wrapper itself has no licence file at this commit or at master 5f3637e2 (checked 2026-10-29).",
+    "The .crate's notices are upstream/LICENSE (Cisco's BSD-2-Clause for the vendored OpenH264 C library; kept as a nested notice) and tests/reference/BINARY_LICENSE.txt (Cisco's licence for its own prebuilt binaries; a test reference that this package does not ship, and the collector does not pick up its name).",
+    "The wrapper itself has no licence text at this commit or at master 5f3637e2 (checked 2026-10-29).",
     "README.md L178 at this commit: 'Wrapper code is [BSD-2](https://opensource.org/licenses/BSD-2-Clause), Ralf Biedert.'"
    ],
    "status": "No verified wrapper text exists, so none is shipped or reconstructed. Distribution is blocked until the owner decides (OWNER-DECISIONS §3)."
@@ -130,8 +130,8 @@
    "repository": "https://github.com/vgarleanu/libva-sys",
    "commit": "9983a48704b51a91c3d960231c95a262a317b445",
    "facts": [
-    "The .crate's notices are vendor/COPYING (libva, Intel) and vendor/test/gtest/LICENSE (Google), kept as nested notices of vendored code.",
-    "The repository has no licence, copying or notice file at this commit or at master e93ab882829573f3155adc7cac1419ff441c26d3 (checked 2026-10-29); README.md has no licence statement.",
+    "The .crate's notices are vendor/COPYING and vendor/test/gtest/LICENSE: vendor is a git submodule of intel/libva-utils (commit b2c650bb at this commit), so these are the libva-utils (Intel) and Google Test licences of vendored code, kept as nested notices.",
+    "The repository has no licence, copying or notice file of its own and no README at this commit or at master e93ab882829573f3155adc7cac1419ff441c26d3 (checked 2026-10-29).",
     "Cargo.toml: license = \"MIT\" and the non-standard key author = \"Valerian G. <valerian@dusklabs.io>\" (so Cargo reports no authors)."
    ],
    "status": "No verified text exists, so none is shipped or reconstructed. Distribution is blocked until the owner decides (OWNER-DECISIONS §3)."

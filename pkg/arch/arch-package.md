@@ -41,7 +41,8 @@ CI may reuse a checked package build only for the same recipe/source files,
 toolchain/image/snapshot pins, builder script, PAM probe and workflow file.
 Output hashes are checked after restore. ARCH-BUILD-PROVENANCE.json identifies
 the originating run and the runtime commit it built; a reused build also gets
-ARCH-BUILD-REUSE.json, which states that build and tests were not re-executed.
+ARCH-BUILD-REUSE.json, which states that build and tests were not re-executed,
+and the reuse step fails unless that runtime commit is the recipe's `_commit`.
 Lifecycle tests always use a newly prepared runtime root. No Cargo target cache
 or workstation state is reused.
 
@@ -83,9 +84,10 @@ the unresolved records with their evidence. It covers the whole graph,
 including build and dev dependencies, and is not a legal compliance opinion.
 
 Unresolved, with no text shipped or reconstructed: openh264 0.9.3 and
-openh264-sys2 0.9.6 (the upstream README states only "Wrapper code is BSD-2,
-Ralf Biedert" and publishes no licence text) and libva-sys 0.1.2 (Cargo.toml
-says MIT; no licence text exists upstream). Do not distribute this package
+openh264-sys2 0.9.6 (the upstream README states only "Wrapper code is
+[BSD-2](https://opensource.org/licenses/BSD-2-Clause), Ralf Biedert." and
+publishes no licence text) and libva-sys 0.1.2 (Cargo.toml says MIT; the
+repository has no licence text and no README). Do not distribute this package
 until they are resolved.
 
 ## Configure the existing desktop
