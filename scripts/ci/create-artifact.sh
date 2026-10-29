@@ -4,7 +4,7 @@ set -euo pipefail
 # Run only after the frozen release build on the disposable CPU runner.
 # The public CPU artifact carries evidence about the executable, not the
 # executable: it would need the dependency notices that only the Arch package
-# collects. The recorded hash identifies the binary that CI built and tested.
+# collects. The recorded hash identifies the release binary this run built.
 mkdir -p artifacts/build-output
 cp LICENSE README.md Cargo.toml Cargo.lock rust-toolchain.toml artifacts/build-output/
 cp ci/baseline.json artifacts/build-output/
@@ -16,7 +16,9 @@ CPU development build evidence of the hypr-rdp fork, based on upstream 0.1.7.
 The optional native NVENC worker/capture/AVC420 integration is compiled in.
 Its GPU/driver/client behavior remains unqualified; see nvenc-integration.md.
 The executable is not included: its dependency notices are not bundled here.
-hypr-rdp.sha256 records the hash of the binary that CI built and tested.
+hypr-rdp.sha256, next to this archive, records the SHA-256 of the release binary
+this run built. CI tests run on debug builds; the release binary is only checked
+statically (symbols, linkage, --version).
 This is not an Arch package and has not passed GPU, live-desktop, PAM, network,
 Windows/macOS or installation/removal qualification.
 NOTICE
@@ -34,8 +36,10 @@ fi
 python3 - <<'PY'
 from pathlib import Path
 
-executables = [str(p) for p in Path("artifacts").rglob("*")
+executables = [p for p in Path("artifacts").rglob("*")
                if p.is_file() and p.open("rb").read(4) == b"\x7fELF"]
+for path in executables:
+    path.unlink()  # The upload step runs even when this one fails.
 if executables:
     raise SystemExit(f"no executable may be published without its dependency notices: {executables}")
 PY
