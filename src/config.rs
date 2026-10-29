@@ -13,6 +13,7 @@ use crate::input::KeyboardLayoutPolicy;
 use ironrdp_cliprdr::pdu::MAX_FILE_COUNT;
 
 pub(crate) const DEFAULT_FILE_TRANSFER_MAX_ENTRIES: usize = 10_000;
+const MAX_PASSWORD_FILE_BYTES: u64 = 1024 * 1024;
 
 /// Which directions of clipboard file transfer a session may serve.
 ///
@@ -627,10 +628,37 @@ fn resolve_password(
 
 /// Reads a password from `path`, stripping exactly one trailing line ending
 /// (`\n` or `\r\n`). Fails if the file cannot be read, or is empty once that
-/// trailing line ending is removed.
+/// trailing line ending is removed. Only private regular files up to 1 MiB
+/// are accepted; metadata and content are read through the same descriptor.
 fn read_password_file(path: &str) -> anyhow::Result<String> {
-    let mut content = std::fs::read(path)
+    use std::fs::OpenOptions;
+    use std::io::Read;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC)
+        .open(path)
         .map_err(|error| anyhow::anyhow!("failed to read password file {path:?}: {error}"))?;
+    let metadata = file.metadata().map_err(|error| {
+        anyhow::anyhow!("failed to inspect password file {path:?}: {error}")
+    })?;
+    anyhow::ensure!(
+        metadata.is_file(),
+        "password file {path:?} must be a regular file"
+    );
+    anyhow::ensure!(
+        metadata.permissions().mode() & 0o077 == 0,
+        "password file {path:?} must not be accessible by group or others (use mode 0600 or 0400)"
+    );
+    let mut content = Vec::new();
+    file.take(MAX_PASSWORD_FILE_BYTES + 1)
+        .read_to_end(&mut content)
+        .map_err(|error| anyhow::anyhow!("failed to read password file {path:?}: {error}"))?;
+    anyhow::ensure!(
+        content.len() as u64 <= MAX_PASSWORD_FILE_BYTES,
+        "password file {path:?} exceeds 1 MiB"
+    );
 
     if content.last() == Some(&b'\n') {
         content.pop();
@@ -1446,7 +1474,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let path = write_password_file("password-file-permissions", "CANARY-PRIVATE-PASSWORD\n");
-        for mode in [0o644, 0o620, 0o604, 0o601] {
+        for mode in [0o644, 0o640, 0o620, 0o610, 0o604, 0o602, 0o601] {
             fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
             let result = read_password_file(path.to_str().unwrap());
             assert!(

@@ -1,5 +1,20 @@
 # Changelog
 
+## NVIDIA fork — unreleased
+
+### Changed
+
+- Password files must now be regular files of at most 1 MiB with no group or
+  other permissions (normally 0600 or 0400). Existing upstream password files
+  with broader permissions must be made private before startup. Symlinks to
+  private regular files and the existing single-newline stripping remain supported.
+
+### Fixed
+
+- Reject FIFOs and devices without reading password data or waiting for a FIFO
+  writer. Inspect the same opened descriptor that supplies the password and
+  bound reads even when a regular file grows after the metadata check.
+
 ## [0.1.7] - 2026-10-20
 
 ### Added
