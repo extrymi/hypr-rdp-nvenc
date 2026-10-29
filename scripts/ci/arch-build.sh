@@ -42,6 +42,10 @@ for package in /out/*.pkg.tar.zst; do
         echo 'Unexpected package side-effect surface' >&2; exit 1
     fi
 done
+current_packages=(/out/hypr-rdp-nvenc-*-1-x86_64.pkg.tar.zst)
+[[ ${#current_packages[@]} == 1 ]]
+python3 /source/scripts/ci/arch/verify-payload.py "${current_packages[0]}" /source \
+    "$runtime_source" "$GITHUB_SHA" | tee /out/arch-payload-verification.json
 python3 - <<'PY'
 import hashlib, json, os
 from pathlib import Path

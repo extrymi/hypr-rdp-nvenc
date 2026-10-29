@@ -23,7 +23,7 @@ for name, expected in zip(("hypr-rdp-nvenc.service", "config.example.toml", "hyp
     assert hashlib.sha256((recipe / name).read_bytes()).hexdigest() == expected, name
 workflow = (root / ".github/workflows/arch-package.yml").read_text()
 actions = re.findall(r"uses:\s*([^\s@]+)@([^\s#]+)", workflow)
-assert len(actions) == 4
+assert len(actions) == 7
 for name, commit in actions:
     expected = manifest["cache_action"] if name in {"actions/cache/restore", "actions/cache/save"} else baseline["actions"][name]["commit"]
     assert re.fullmatch(r"[0-9a-f]{40}", expected) and commit == expected, name
