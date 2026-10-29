@@ -67,15 +67,22 @@ CUDA toolkit and FFmpeg are not required by this backend.
 
 Original MIT and NVIDIA interface-header notices are retained. Dependency notice
 files are copied from the exact Cargo-resolved sources of the
-x86_64-unknown-linux-gnu graph (`cargo metadata --filter-platform`), including
-nested native library notices for OpenH264, AWS-LC and ring. A crate whose
-published `.crate` omits its licence text gets the upstream text listed in
-`supplemental-licenses.json`, pinned by commit and SHA-256. The
-dependency-licenses/index.json records source/version/SPDX fields and lists
-crates left without a packaged notice; it covers that graph's build and dev
-dependencies and is not a legal compliance opinion. Open item: libva-sys and
-openh264-sys2 ship only a nested native-library notice, which currently counts
-as their notice.
+x86_64-unknown-linux-gnu graph (`cargo metadata --filter-platform`). A crate's
+own licence text is a LICENSE/LICENCE/COPYING/COPYRIGHT/NOTICE file at its
+source root or its declared licence file. Deeper notices, such as the native
+library notices of OpenH264, AWS-LC and ring, are kept but belong to vendored
+code. A crate without its own text gets a verified upstream file from
+`supplemental-licenses.json` (repository and commit recorded, SHA-256 checked at
+build) or an explicit unresolved record; any other gap fails the build. The
+dependency-licenses/index.json lists each crate's notices, its own notices and
+the unresolved records with their evidence. It covers the whole graph,
+including build and dev dependencies, and is not a legal compliance opinion.
+
+Unresolved, with no text shipped or reconstructed: openh264 0.9.3 and
+openh264-sys2 0.9.6 (the upstream README states only "Wrapper code is BSD-2,
+Ralf Biedert" and publishes no licence text) and libva-sys 0.1.2 (Cargo.toml
+says MIT; no licence text exists upstream). Do not distribute this package
+until they are resolved.
 
 ## Configure the existing desktop
 
