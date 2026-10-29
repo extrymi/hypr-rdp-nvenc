@@ -4,7 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main, codex/cpu-baseline, codex/nvenc-lifecycle, codex/startup-validation, codex/native-nvenc]
+    # Every stacked base, so runtime fixes above the packaging pin get CPU CI.
+    branches: ['**']
 
 permissions:
   contents: read
@@ -113,6 +114,20 @@ jobs:
 
       - name: Package baseline evidence
         run: bash scripts/ci/create-artifact.sh
+
+      # The upload runs after any failure, so remove every executable first: the
+      # artifact is public and carries no dependency notices.
+      - name: Refuse to publish executables
+        if: always()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          found = [p for p in Path('artifacts').rglob('*') if p.is_file() and p.open('rb').read(4) == b'\x7fELF']
+          for path in found:
+              path.unlink()
+          if found:
+              raise SystemExit(f'removed executables that must not be published: {[str(p) for p in found]}')
+          PY
 
       - name: Upload CPU baseline and evidence
         if: always()

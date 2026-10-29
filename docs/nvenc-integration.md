@@ -3,7 +3,8 @@
 The optional `nvenc` feature now connects the server's CPU capture/AVC420 path
 to the same-executable private worker. This is a development build. CPU tests
 do not establish NVIDIA driver, desktop, client or installation qualification.
-No workstation deployment or package installation is part of this stage.
+The Arch package installs this document; NVIDIA hardware, real clients and
+installation on a real workstation remain unqualified.
 
 ## Configuration
 
@@ -31,7 +32,7 @@ With `h264_backend="auto"` and an explicit UUID, the selected device is treated
 as NVIDIA: NVENC is tried, never VAAPI/DMA-BUF. A classified backend failure can
 fall back to software only after confirmed child exit. Software recovery uses
 the existing VBR encoder and logs the mode change. Protocol, transport, state
-store, timeout and quarantine errors terminate the session. Auto without a UUID
+store, timeout and quarantine errors end the connection. Auto without a UUID
 retains historical VAAPI/software selection; the parent does not probe CUDA.
 The software/VAAPI modes reject an unrelated nvenc_device setting.
 
@@ -68,6 +69,74 @@ capture and use the existing capture-death connection termination; they do not
 substitute bitmap output. A strict backend also refuses a client without AVC.
 This tears down the remote connection, not Hyprland or the user's applications.
 
+## Operation and diagnostics
+
+A strict backend (`h264_backend = "nvenc"` or `"vaapi"`) never substitutes
+bitmaps or software encoding. It ends capture and the RDP connection and logs
+why: the client did not negotiate AVC; the graphics pipeline was not opened
+within the activation grace (2 s) or was closed; the AVC encoder or surface is
+unavailable; the encoder failed to initialize
+(`Failed to initialize H.264 encoder: …`) or to encode
+(`NVENC failed; ending capture session`, or
+`Forced encoder failed; ending capture session` for VA-API); or it produced
+output too short to send (`… produced no usable output; ending capture session`).
+The server closes only that connection and keeps listening. It does not stop
+Hyprland or the applications, but it cannot isolate them from a kernel or GPU
+fault on the shared device (see below).
+
+With `h264_backend = "auto"` and an `nvenc_device`, an `NVENC: Backend { … }`
+failure, including refused output, switches to software VBR once the worker's
+exit is confirmed
+(`NVENC startup failed after confirmed exit; using software VBR`, or
+`NVENC failed and its worker was reaped; recovering with software VBR and a full IDR`).
+Native output too short to send and every other NVENC error (timeout, I/O,
+protocol, state store, quarantine) end the connection in this mode too.
+
+Output refused by the worker appears in these lines as
+`NVENC: Backend { phase: Encode, fault: InvalidOutput, code: N }`. N names the
+check: 1 input buffer mapping/pitch, 2 bitstream pointer, 3 bitstream size,
+4 hwEncodeStatus, 5 output timestamp, 6 frameIdx, 7 picture type, 8 Annex B
+structure, 9 emulation prevention, 10 SPS size (displayed size or coded bounds),
+11 IDR agreement (including a requested IDR answered with a non-IDR picture),
+12 engine bounds; 0 is reserved and not produced by the current code. NVENC
+(NVENCSTATUS) and CUDA (CUresult) status codes appear only with `fault: Driver`
+or `fault: DeviceUnavailable`. If the parent cannot reap a failed worker within
+1 s, `NVENC: Quarantined` is logged instead, and every later NVENC connection
+fails until that worker is gone (normally a reboot); do not delete its record
+(see Rollback). The worker and the PAM helper execute `/proc/self/exe` with
+argv[0] `hypr-rdp`: their process name (comm, journald `_COMM`) is `exe`, and
+`pgrep -f hypr-rdp` finds them.
+
+Follow `/usr/share/doc/hypr-rdp-nvenc/arch-package.md`: stop
+`hypr-rdp-nvenc.service` before a package change and start it again after
+preflight. If a running service is
+upgraded anyway, its workers and PAM helpers still execute the old image
+(`/proc/self/exe`) but load the current shared libraries and PAM configuration;
+restart it (`systemctl --user restart hypr-rdp-nvenc.service`) after upgrading
+this package or its libraries. Reboot after an NVIDIA driver upgrade: new
+workers load the new userspace driver while the old kernel module is still
+loaded, which is expected to fail NVENC initialization (not tested on
+hardware). Strict mode then ends the connection whenever a new worker starts
+(new connection, resize or renegotiation). Auto mode with an
+`nvenc_device` falls back to software only if the driver reports an error and
+the worker exits; a hang or crash ends the connection.
+
+Frames are charged to the local EGFX window under the IronRDP pipeline lock and
+only while IronRDP tracks them. A completed graphics reset (client CapsAdvertise,
+resize, channel close) or an acknowledgement suspension empties both, so the
+stream does not wait for acknowledgements that will never arrive.
+
+Use `auth_mode = "configured"` (CredSSP/NLA) with a long random password for
+remote access. The pinned IronRDP sets no TCP keepalive in any mode. In the
+TLS-only modes (`pam`, `none`) it serves one connection at a time and leaves
+others in the listen backlog; the X.224/TLS handshake has no deadline, so one
+silent or half-open connection blocks every other client. In `configured` mode
+a newcomer that authenticates within 10 s replaces the current connection,
+including a silent one. In `pam` mode the packaged PAM service includes Arch's
+`system-auth`, which also runs `pam_faillock` for sudo and login. Remote
+failures may count toward that local lockout of the desktop user; this is not
+tested.
+
 ## CPU evidence and open gates
 
 CI tests the actual executable's private dispatch/Hello without sending Init,
@@ -84,8 +153,9 @@ a kernel/GPU fault on a shared device. DMA-BUF/CUDA import is a separate stage.
 
 ## Rollback
 
-This is a stacked draft branch with main frozen; no host state was installed.
-Returning to the prior tested branch removes this source change. Future users
-can choose `h264_backend="software"` and remove `nvenc_device`/CBR; the software
-path does not probe the GPU. Do not delete a live worker record to force recovery.
-Package install/removal and real hardware rollback are not tested here.
+For the package, follow the upgrade and rollback steps in
+`/usr/share/doc/hypr-rdp-nvenc/arch-package.md`.
+Without changing packages, choose `h264_backend="software"` and remove
+`nvenc_device`/CBR; the software path does not probe the GPU. Do not delete a
+live worker record to force recovery. Package lifecycle is exercised only in a
+disposable CI container; rollback on real hardware is not tested.

@@ -1,5 +1,7 @@
 //! Authentication policy for access to the existing desktop.
 mod pam;
+#[cfg(all(test, feature = "nvenc"))]
+pub(crate) use pam::helper_executable;
 
 use crate::config::{AuthConfig, ConfigCredentials};
 use ironrdp_server::{ConnectionPolicy, CredentialValidator, Credentials};

@@ -670,6 +670,9 @@ impl FrameProcessor {
             .is_some_and(|shared| shared.is_ready() && !shared.is_avc_enabled())
         {
             if !self.h264_backend.allows_software() {
+                tracing::error!(
+                    "The EGFX client did not negotiate AVC; the strict H.264 backend ends the capture session"
+                );
                 return false;
             }
             return self.process_clearcodec(data);
@@ -937,9 +940,16 @@ impl FrameProcessor {
                             );
                         }
                         Some(Ok(_)) => {
-                            if !self.h264_backend.allows_software()
-                                || self.h264_encoder.as_ref().is_some_and(|e| e.is_nvenc())
-                            {
+                            let native = self.h264_encoder.as_ref().is_some_and(|e| e.is_nvenc());
+                            if native || !self.h264_backend.allows_software() {
+                                let source = if native {
+                                    "Native NVENC"
+                                } else {
+                                    "The strict H.264 backend"
+                                };
+                                tracing::error!(
+                                    "{source} produced no usable output; ending capture session"
+                                );
                                 return false;
                             }
                             self.encode_failures += 1;
@@ -966,7 +976,7 @@ impl FrameProcessor {
                                     tracing::error!(%e, "NVENC failed; ending capture session");
                                     return false;
                                 }
-                                tracing::warn!(%e, "NVENC worker exited; recovering with software VBR and a full IDR");
+                                tracing::warn!(%e, "NVENC failed and its worker was reaped; recovering with software VBR and a full IDR");
                                 let replacement =
                                     crate::egfx::FrameEncoder::new_software_only_for_egfx_codec(
                                         EgfxCodec::Avc420,
@@ -1078,15 +1088,31 @@ impl FrameProcessor {
             self.egfx_active && self.h264_encoder.is_some() && self.egfx_surface_id.is_some();
         let should_send_bitmap = match egfx_state {
             None => true,
-            Some((false, _)) => self
-                .egfx_shared
-                .as_ref()
-                .is_some_and(|shared| shared.bitmap_fallback_due(now)),
+            Some((false, _)) => self.egfx_shared.as_ref().is_some_and(|shared| {
+                shared.bitmap_fallback_due(
+                    now,
+                    if self.h264_backend.allows_software() {
+                        "sending bitmap updates instead"
+                    } else {
+                        "the strict H.264 backend ends the session"
+                    },
+                )
+            }),
             Some((true, avc_enabled)) => !avc_enabled || !egfx_runtime_available,
         };
 
         if !sent_via_egfx && should_send_bitmap {
             if !self.h264_backend.allows_software() {
+                let reason = match egfx_state {
+                    None => "the client has no graphics pipeline",
+                    Some((false, _)) => "the graphics pipeline is not open",
+                    Some((true, false)) => "the client did not negotiate AVC",
+                    Some((true, true)) => "the AVC encoder or surface is unavailable",
+                };
+                tracing::error!(
+                    reason,
+                    "Strict H.264 backend cannot substitute bitmaps; ending capture session"
+                );
                 return false;
             }
             self.sent_first_frame = true;
@@ -1114,6 +1140,70 @@ impl FrameProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Runs `f` with a thread-local subscriber and returns its formatted events.
+    fn captured_logs(f: impl FnOnce()) -> String {
+        #[derive(Clone)]
+        struct Captured(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+        impl std::io::Write for Captured {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let buffer = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let writer = Captured(std::sync::Arc::clone(&buffer));
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(move || writer.clone())
+            .finish();
+        tracing::subscriber::with_default(subscriber, f);
+        let output = String::from_utf8(buffer.lock().unwrap().clone()).unwrap();
+        output
+    }
+
+    #[test]
+    fn forced_native_backend_ends_session_when_the_graphics_pipeline_never_opens() {
+        let shared = crate::egfx::test_support::unnegotiated_egfx_shared(
+            64,
+            64,
+            crate::egfx::EgfxCodecPolicy::Avc420,
+        );
+        let (tx, mut rx) = mpsc::channel(4);
+        let device = "GPU-01234567-89ab-cdef-0123-456789abcdef".parse().unwrap();
+        let mut proc = FrameProcessor::new_with_h264_backend(
+            Some(shared),
+            64,
+            64,
+            PixelFormat::BgrA32,
+            256,
+            1_000_000,
+            23,
+            H264RateControl::Cbr,
+            30,
+            H264BackendPolicy::Nvenc(device),
+        );
+        let start = Instant::now();
+        proc.queue_damage(&[(0, 0, 64, 64)]);
+        let frame = [0; 64 * 64 * 4];
+        let logs = captured_logs(|| {
+            assert!(proc.process_at(&frame, &tx, start));
+            let expired = start + crate::egfx::GFX_READY_GRACE;
+            assert!(!proc.process_at(&frame, &tx, expired));
+        });
+        assert!(rx.try_recv().is_err());
+        assert!(logs.contains("the graphics pipeline is not open"), "{logs}");
+        assert!(
+            logs.contains("the strict H.264 backend ends the session"),
+            "{logs}"
+        );
+        assert!(!logs.contains("sending bitmap updates instead"), "{logs}");
+    }
+
     #[test]
     fn forced_native_backend_refuses_non_avc_client_without_bitmap_substitution() {
         let (shared, mut events) = negotiated_no_avc_egfx(64, 64);
@@ -1132,9 +1222,11 @@ mod tests {
             H264BackendPolicy::Nvenc(device),
         );
         proc.queue_damage(&[(0, 0, 64, 64)]);
-        assert!(!proc.process(&[0; 64 * 64 * 4], &tx));
+        let logs = captured_logs(|| assert!(!proc.process(&[0; 64 * 64 * 4], &tx)));
         assert!(rx.try_recv().is_err());
         drain_gfx_pdus(&mut events).assert_no_encoded_frame();
+        assert!(logs.contains("did not negotiate AVC"), "{logs}");
+        assert!(logs.contains("ends the capture session"), "{logs}");
     }
     #[cfg(feature = "nvenc")]
     #[test]
@@ -1216,6 +1308,69 @@ mod tests {
                 assert!((i16::from(frame.y()[0]) - 182).abs() <= 4);
                 assert!(crate::egfx::annex_b_nal_types(stream.data).contains(&5));
             }
+            assert!(bitmaps.try_recv().is_err());
+            drop(proc);
+            drop(root);
+        }
+    }
+
+    #[cfg(feature = "nvenc")]
+    #[test]
+    fn unusable_native_output_ends_capture_in_auto_and_strict_mode() {
+        // AutoNvenc first: before FDIAG-02 its log blamed a strict backend.
+        for automatic in [true, false] {
+            let (encoder, root) = crate::egfx::nvenc_test_encoder(false);
+            let device = "GPU-01234567-89ab-cdef-0123-456789abcdef".parse().unwrap();
+            let policy = if automatic {
+                H264BackendPolicy::AutoNvenc(device)
+            } else {
+                H264BackendPolicy::Nvenc(device)
+            };
+            let (shared, mut bridge, _handle, _sender, mut events) =
+                crate::egfx::test_support::negotiated_avc420_session(
+                    64,
+                    64,
+                    DEFAULT_MAX_FRAMES_IN_FLIGHT,
+                );
+            let (tx, mut bitmaps) = mpsc::channel(4);
+            let mut proc = FrameProcessor::new_with_h264_backend(
+                Some(Arc::clone(&shared)),
+                64,
+                64,
+                PixelFormat::RgbX32,
+                256,
+                1_000_000,
+                23,
+                H264RateControl::Cbr,
+                30,
+                policy,
+            );
+            proc.egfx_ready = true;
+            proc.egfx_generation = shared.generation();
+            proc.egfx_codec = Some(EgfxCodec::Avc420);
+            proc.h264_encoder = Some(crate::egfx::FrameEncoder::Nvenc(Box::new(encoder)));
+            proc.queue_damage(&[(0, 0, 64, 64)]);
+            let mut red = [255, 0, 0, 255].repeat(64 * 64);
+            assert!(proc.process(&red, &tx));
+            assert!(drain_gfx_pdus(&mut events)
+                .as_slice()
+                .iter()
+                .any(|p| matches!(p, ironrdp_egfx::pdu::GfxPdu::WireToSurface1(_))));
+            ack_frame(
+                &mut bridge,
+                shared.frame_flow_snapshot().last_queued_frame_id,
+                TestQueueDepth::AvailableBytes(0),
+            );
+            // A nearly unchanged picture: the CPU oracle returns the raw P
+            // picture of a few bytes, which is not a sendable AVC420 frame.
+            red[0] ^= 1;
+            proc.queue_damage(&[(0, 0, 64, 64)]);
+            let logs = captured_logs(|| assert!(!proc.process(&red, &tx)));
+            assert!(
+                logs.contains("Native NVENC produced no usable output"),
+                "automatic={automatic}: {logs}"
+            );
+            drain_gfx_pdus(&mut events).assert_no_encoded_frame();
             assert!(bitmaps.try_recv().is_err());
             drop(proc);
             drop(root);
@@ -1754,6 +1909,53 @@ mod tests {
         assert!(
             matches!(second_rx.try_recv(), Ok(DisplayUpdate::Bitmap(_))),
             "the wait belongs to the connection, not to whichever processor is current"
+        );
+    }
+
+    #[cfg(feature = "vaapi")]
+    #[test]
+    fn dmabuf_activation_timeout_leaves_the_bitmap_warning_to_shm_capture() {
+        use crate::capture::wayland::dmabuf_egfx_activation_timed_out as dmabuf_timed_out;
+        let width = 16;
+        let height = 16;
+        let stride = width * 4;
+        let shared = unnegotiated_egfx_shared(width as u16, height as u16, EgfxCodecPolicy::Auto);
+        let frame = gradient_bgra_frame(width, height, stride);
+        let (display_tx, mut display_rx) = mpsc::channel(4);
+        let mut processor = FrameProcessor::new(
+            Some(Arc::clone(&shared)),
+            width as u32,
+            height as u32,
+            PixelFormat::BgrA32,
+            stride as u32,
+            1_000_000,
+            23,
+            H264RateControl::Vbr,
+            30,
+        );
+
+        let start = Instant::now();
+        let expired = start + GFX_READY_GRACE;
+        let logs = captured_logs(|| {
+            assert!(!dmabuf_timed_out(&shared, false, start));
+            // DMA-BUF capture gives up first and hands the connection to SHM capture.
+            assert!(dmabuf_timed_out(&shared, false, expired));
+            processor.queue_damage(&[(0, 0, width as i32, height as i32)]);
+            assert!(processor.process_at(&frame, &display_tx, expired));
+        });
+
+        assert!(matches!(
+            display_rx.try_recv(),
+            Ok(DisplayUpdate::Bitmap(_))
+        ));
+        assert!(
+            logs.contains("sending bitmap updates instead"),
+            "the bitmap substitution the user sees must be logged: {logs}"
+        );
+        assert_eq!(
+            logs.matches("has not opened the graphics pipeline").count(),
+            1,
+            "{logs}"
         );
     }
 

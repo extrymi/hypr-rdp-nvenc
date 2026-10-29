@@ -14,7 +14,7 @@ use openh264::{
 use super::{driver::NativeDriver, ffi::*, loader::Api};
 use crate::nvenc::{
     annexb::{split, AnnexB},
-    Config, Driver, Engine, Error, Fault, Frame, Phase, Stamp,
+    Config, Driver, Engine, Error, Fault, Frame, OutputCheck, Phase, Stamp,
 };
 
 extern "C" {
@@ -236,17 +236,29 @@ fn unsupported_formats_unbounded_counts_and_null_success_handles_fail_closed() {
 
 #[test]
 fn output_failures_always_unlock_and_never_forward_invalid_or_stale_data() {
-    for mode in [2, 3, 4, 5, 8] {
+    for (mode, check) in [
+        (2, OutputCheck::Timestamp),
+        (3, OutputCheck::BitstreamSize),
+        (4, OutputCheck::BitstreamPointer),
+        (5, OutputCheck::InputMapping),
+        (8, OutputCheck::PictureType),
+        (14, OutputCheck::EncodeStatus),
+        (15, OutputCheck::FrameIndex),
+    ] {
         let fixture = Fixture::new(mode, "", 0);
         fixture.packet(&packets()[0]);
         let mut engine = Engine::new(fixture.driver(), config()).unwrap();
-        assert!(engine
-            .encode(frame(
+        // Each refusal names its check; the fault stays InvalidOutput, so the
+        // fallback and quarantine policy do not change.
+        assert_eq!(
+            engine.encode(frame(
                 &vec![0x42; config().frame_bytes().unwrap()],
                 0,
                 false
-            ))
-            .is_err());
+            )),
+            Err(Error::invalid_output(check)),
+            "mode {mode}"
+        );
         drop(engine);
         let trace = fixture.trace();
         let lock = if mode == 5 { "input" } else { "output" };
@@ -391,34 +403,93 @@ fn annexb_rejects_bad_boundaries_parameter_sets_geometry_and_idr_mismatch() {
         &[0, 0, 1, 0x65, 0x80],
         &[1, 0, 0, 1, 0x65, 0x80],
     ] {
-        assert!(AnnexB::default()
-            .normalize(bad, 64, 64, true, true)
-            .is_err());
+        assert_eq!(
+            AnnexB::default().normalize(bad, 64, 64, true, true),
+            Err(Error::invalid_output(OutputCheck::AnnexB)),
+            "{bad:02x?}"
+        );
     }
-    assert!(AnnexB::default()
-        .normalize(first, 66, 64, true, true)
-        .is_err());
-    assert!(AnnexB::default()
-        .normalize(first, 64, 64, true, false)
-        .is_err());
+    assert_eq!(
+        AnnexB::default().normalize(first, 66, 64, true, true),
+        Err(Error::invalid_output(OutputCheck::Geometry))
+    );
+    assert_eq!(
+        AnnexB::default().normalize(first, 64, 64, true, false),
+        Err(Error::invalid_output(OutputCheck::IdrAgreement))
+    );
     let without_pps: Vec<u8> = split(first)
         .unwrap()
         .iter()
         .filter(|n| n[0] & 31 != 8)
         .flat_map(|n| [vec![0, 0, 0, 1], n.to_vec()].concat())
         .collect();
-    assert!(AnnexB::default()
-        .normalize(&without_pps, 64, 64, true, true)
-        .is_err());
-    assert!(AnnexB::default()
-        .normalize(
-            &[first.as_slice(), first.as_slice()].concat(),
-            64,
-            64,
-            true,
-            true
-        )
-        .is_err());
+    assert_eq!(
+        AnnexB::default().normalize(&without_pps, 64, 64, true, true),
+        Err(Error::invalid_output(OutputCheck::AnnexB))
+    );
+    let duplicate = [first.as_slice(), first.as_slice()].concat();
+    assert_eq!(
+        AnnexB::default().normalize(&duplicate, 64, 64, true, true),
+        Err(Error::invalid_output(OutputCheck::AnnexB))
+    );
+    // A requested IDR that comes back as a P picture, with matching driver type.
+    let stream = packets();
+    let mut annexb = AnnexB::default();
+    annexb.normalize(&stream[0], 64, 64, true, true).unwrap();
+    assert_eq!(
+        annexb.normalize(&stream[1], 64, 64, true, false),
+        Err(Error::invalid_output(OutputCheck::IdrAgreement))
+    );
+}
+
+/// Structural-only fixture: OpenH264 emits CAVLC. Setting the PPS entropy flag
+/// makes our parser treat the slices as CABAC; the result is not decodable.
+/// Each slice NAL gets one cabac_zero_word, encapsulated as 00 00 03 (7.4.1).
+fn with_entropy_flag_and_zero_word(packet: &[u8], cabac: bool) -> Vec<u8> {
+    split(packet)
+        .unwrap()
+        .iter()
+        .flat_map(|nal| {
+            let mut nal = nal.to_vec();
+            match nal[0] & 31 {
+                // pic_parameter_set_id ue(0) = '1', seq_parameter_set_id ue(0) = '1',
+                // then entropy_coding_mode_flag (7.3.2.2).
+                8 => {
+                    assert_eq!(nal[1] & 0b1100_0000, 0b1100_0000);
+                    if cabac {
+                        nal[1] |= 0b0010_0000;
+                    } else {
+                        nal[1] &= !0b0010_0000;
+                    }
+                }
+                1 | 5 => {
+                    assert_ne!(nal.last(), Some(&0), "slice must end in its stop-bit byte");
+                    nal.extend_from_slice(&[0, 0, 3]);
+                }
+                _ => {}
+            }
+            [vec![0, 0, 0, 1], nal].concat()
+        })
+        .collect()
+}
+
+#[test]
+fn cabac_zero_word_tail_is_kept_for_cabac_slices_and_rejected_for_cavlc() {
+    let first = &packets()[0];
+    let cabac = with_entropy_flag_and_zero_word(first, true);
+    let unit = AnnexB::default()
+        .normalize(&cabac, 64, 64, true, true)
+        .expect("H.264 7.4.1: a CABAC slice may end in cabac_zero_word");
+    assert!(split(&unit.bytes)
+        .unwrap()
+        .iter()
+        .any(|nal| nal[0] & 31 == 5 && nal.ends_with(&[0, 0, 3])));
+    // 7.3.2.10: cabac_zero_word exists only when entropy_coding_mode_flag is 1.
+    let cavlc = with_entropy_flag_and_zero_word(first, false);
+    assert_eq!(
+        AnnexB::default().normalize(&cavlc, 64, 64, true, true),
+        Err(Error::invalid_output(OutputCheck::EmulationPrevention))
+    );
 }
 
 proptest::proptest! {

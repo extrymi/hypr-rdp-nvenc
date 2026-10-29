@@ -26,6 +26,9 @@ mod wlr;
 
 use state::AppState;
 
+#[cfg(all(test, feature = "vaapi"))]
+pub(in crate::capture) use dmabuf_capture::dmabuf_egfx_activation_timed_out;
+
 const CAPTURE_SESSION_RESTART_LIMIT: u32 = 5;
 
 /// A session that ran healthily this long since its last restart has paid

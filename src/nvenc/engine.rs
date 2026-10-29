@@ -1,5 +1,6 @@
 use super::{
-    AccessUnit, Config, EncodedFrame, Error, Fault, Frame, Phase, BUFFER_COUNT, MAX_OUTPUT_BYTES,
+    AccessUnit, Config, EncodedFrame, Error, Fault, Frame, OutputCheck, Phase, BUFFER_COUNT,
+    MAX_OUTPUT_BYTES,
 };
 
 /// Distinguishes unaccepted input from accepted input with delayed output.
@@ -100,7 +101,7 @@ impl<D: Driver> Engine<D> {
             || unit.bytes.len() > MAX_OUTPUT_BYTES
             || (frame.force_idr && !unit.is_idr)
         {
-            return Err(Error::backend(Phase::Encode, Fault::InvalidOutput));
+            return Err(Error::invalid_output(OutputCheck::EngineOutput));
         }
         self.next_sequence += 1;
         Ok(EncodedFrame {

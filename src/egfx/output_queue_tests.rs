@@ -232,3 +232,37 @@ fn output_queue_generation_change_does_not_reset_live_slots() {
         assert!(session.shared.full_frame_refresh_readiness().is_ready());
     }
 }
+
+#[test]
+fn output_queue_frames_sent_while_acks_are_suspended_do_not_charge_after_resume() {
+    for codec in [
+        FrameEncoding::ClearCodec,
+        FrameEncoding::Avc420,
+        FrameEncoding::Avc444,
+    ] {
+        let (mut session, surface) = session(codec);
+        drain_gfx_pdus(&mut session.event_rx);
+        assert!(send(&session, surface, codec, 17));
+        let first = frame_id(&consume_one(&mut session));
+        ack_frame(&mut session.bridge, first, QueueDepth::Suspend);
+        // IronRDP does not track frames sent while the client suspends ACKs
+        // and forwards only the first ACK that resumes them.
+        let mut suspended = Vec::new();
+        for value in 18..22 {
+            assert!(send(&session, surface, codec, value), "{codec:?}");
+            suspended.push(frame_id(&consume_one(&mut session)));
+        }
+        for id in suspended {
+            ack_frame(&mut session.bridge, id, QueueDepth::AvailableBytes(8));
+        }
+        assert_eq!(
+            session.shared.frames_in_flight(),
+            0,
+            "{codec:?}: suspended frames left charges after resume"
+        );
+        assert!(
+            session.shared.full_frame_refresh_readiness().is_ready(),
+            "{codec:?}"
+        );
+    }
+}

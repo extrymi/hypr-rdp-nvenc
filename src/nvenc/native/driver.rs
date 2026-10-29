@@ -2,8 +2,8 @@ use std::{ffi::c_void, marker::PhantomData, ptr, rc::Rc};
 
 use super::{ffi::*, guids, loader::Api};
 use crate::nvenc::{
-    annexb::AnnexB, AccessUnit, Config, Driver, Error, Fault, Frame, Phase, Stamp, Submission,
-    BUFFER_COUNT, MAX_OUTPUT_BYTES,
+    annexb::AnnexB, AccessUnit, Config, Driver, Error, Fault, Frame, OutputCheck, Phase, Stamp,
+    Submission, BUFFER_COUNT, MAX_OUTPUT_BYTES,
 };
 
 #[derive(Default)]
@@ -50,9 +50,6 @@ fn cu(status: CUresult) -> Result<(), Error> {
 }
 fn unsupported() -> Error {
     Error::backend(Phase::Probe, Fault::CapabilityUnsupported)
-}
-fn invalid_output() -> Error {
-    Error::backend(Phase::Encode, Fault::InvalidOutput)
 }
 
 fn same_guid(a: GUID, b: GUID) -> bool {
@@ -512,7 +509,7 @@ impl Driver for NativeDriver {
         let copy =
             if lock.bufferDataPtr.is_null() || (lock.pitch as usize) < width || lock.pitch > 131072
             {
-                Err(invalid_output())
+                Err(Error::invalid_output(OutputCheck::InputMapping))
             } else {
                 // NV12 has Y rows followed by interleaved UV rows, both with the
                 // driver-provided pitch. Padding is never read from the source.
@@ -594,16 +591,27 @@ impl Driver for NativeDriver {
             unsafe { self.api().enc.nvEncLockBitstream.unwrap()(self.session, &mut lock) },
             Phase::Encode,
         )?;
-        let checked = if lock.bitstreamBufferPtr.is_null()
-            || lock.bitstreamSizeInBytes == 0
+        let refused = if lock.bitstreamBufferPtr.is_null() {
+            Some(OutputCheck::BitstreamPointer)
+        } else if lock.bitstreamSizeInBytes == 0
             || lock.bitstreamSizeInBytes as usize > MAX_OUTPUT_BYTES
-            || lock.hwEncodeStatus != 0
-            || lock.outputTimeStamp != stamp.sequence
-            || lock.frameIdx != stamp.sequence as u32
-            || ![NV_ENC_PIC_TYPE_IDR, NV_ENC_PIC_TYPE_P, NV_ENC_PIC_TYPE_I]
-                .contains(&lock.pictureType)
         {
-            Err(invalid_output())
+            Some(OutputCheck::BitstreamSize)
+        } else if lock.hwEncodeStatus != 0 {
+            Some(OutputCheck::EncodeStatus)
+        } else if lock.outputTimeStamp != stamp.sequence {
+            Some(OutputCheck::Timestamp)
+        } else if lock.frameIdx != stamp.sequence as u32 {
+            Some(OutputCheck::FrameIndex)
+        } else if ![NV_ENC_PIC_TYPE_IDR, NV_ENC_PIC_TYPE_P, NV_ENC_PIC_TYPE_I]
+            .contains(&lock.pictureType)
+        {
+            Some(OutputCheck::PictureType)
+        } else {
+            None
+        };
+        let checked = if let Some(check) = refused {
+            Err(Error::invalid_output(check))
         } else {
             // SAFETY: locked output guarantees this bounded readable extent.
             let bytes = unsafe {

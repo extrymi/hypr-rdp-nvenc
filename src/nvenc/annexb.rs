@@ -1,9 +1,13 @@
 //! Bounded H.264 framing/parameter checks for the fixed progressive AVC420 path.
 //! This is not a replacement for decoder/hardware conformance qualification.
-use super::{AccessUnit, Error, Fault, Phase, MAX_OUTPUT_BYTES};
+use super::{AccessUnit, Error, OutputCheck, MAX_OUTPUT_BYTES};
 
 fn invalid() -> Error {
-    Error::backend(Phase::Encode, Fault::InvalidOutput)
+    Error::invalid_output(OutputCheck::AnnexB)
+}
+
+fn refused(check: OutputCheck) -> Error {
+    Error::invalid_output(check)
 }
 
 #[derive(Default)]
@@ -19,6 +23,8 @@ struct Parameters {
     pps_id: u32,
     width: u32,
     height: u32,
+    // PPS entropy_coding_mode_flag: only CABAC slices may end in cabac_zero_word.
+    cabac: bool,
 }
 
 impl AnnexB {
@@ -51,7 +57,7 @@ impl AnnexB {
                     }
                     let (id, w, h) = sps(nal)?;
                     if w != width || h != height {
-                        return Err(invalid());
+                        return Err(refused(OutputCheck::Geometry));
                     }
                     fresh_sps = Some((id, nal.to_vec()));
                 }
@@ -59,18 +65,20 @@ impl AnnexB {
                     if slice.is_some() || fresh_pps.is_some() {
                         return Err(invalid());
                     }
-                    let mut bits = Bits::new(nal)?;
+                    let mut bits = Bits::new(nal, false)?;
                     let pps_id = bits.ue()?;
                     let sps_id = bits.ue()?;
+                    let cabac = bits.take(1)? == 1;
                     if pps_id > 255 || sps_id > 31 {
                         return Err(invalid());
                     }
-                    fresh_pps = Some((pps_id, sps_id, nal.to_vec()));
+                    fresh_pps = Some((pps_id, sps_id, cabac, nal.to_vec()));
                 }
                 kind @ (1 | 5) => {
                     if fresh_sps.is_some() || fresh_pps.is_some() {
                         let (sps_id, sps) = fresh_sps.take().ok_or_else(invalid)?;
-                        let (pps_id, referenced_sps, pps) = fresh_pps.take().ok_or_else(invalid)?;
+                        let (pps_id, referenced_sps, cabac, pps) =
+                            fresh_pps.take().ok_or_else(invalid)?;
                         if referenced_sps != sps_id {
                             return Err(invalid());
                         }
@@ -81,13 +89,17 @@ impl AnnexB {
                             pps_id,
                             width,
                             height,
+                            cabac,
                         });
                     }
                     let p = parameters.as_ref().ok_or_else(invalid)?;
-                    if p.width != width || p.height != height || p.sps_id > 31 {
+                    if p.width != width || p.height != height {
+                        return Err(refused(OutputCheck::Geometry));
+                    }
+                    if p.sps_id > 31 {
                         return Err(invalid());
                     }
-                    let mut bits = Bits::new(nal)?;
+                    let mut bits = Bits::new(nal, p.cabac)?;
                     let first_mb = bits.ue()?;
                     let slice_type = bits.ue()?;
                     let pps = bits.ue()?;
@@ -121,7 +133,7 @@ impl AnnexB {
         }
         let is_idr = slice.ok_or_else(invalid)?;
         if is_idr != driver_idr || (force_idr && !is_idr) {
-            return Err(invalid());
+            return Err(refused(OutputCheck::IdrAgreement));
         }
         // A recovery/first IDR must carry this generation's parameter sets,
         // rather than borrowing stale state from a previous encoder instance.
@@ -215,19 +227,23 @@ struct Bits {
     position: usize,
 }
 impl Bits {
-    fn new(nal: &[u8]) -> Result<Self, Error> {
+    /// `cabac_slice`: H.264 7.4.1/7.3.2.10 append a final emulation prevention
+    /// byte only when a CABAC slice RBSP ends in cabac_zero_word (0x0000).
+    fn new(nal: &[u8], cabac_slice: bool) -> Result<Self, Error> {
         let mut rbsp = Vec::with_capacity(nal.len());
         let mut zeros = 0;
         for (index, &byte) in nal[1..].iter().enumerate() {
             if zeros >= 2 && byte == 3 {
-                if nal.get(index + 2).is_none_or(|next| *next > 3) {
-                    return Err(invalid());
+                match nal.get(index + 2) {
+                    Some(next) if *next <= 3 => {}
+                    None if cabac_slice => {}
+                    _ => return Err(refused(OutputCheck::EmulationPrevention)),
                 }
                 zeros = 0;
                 continue;
             }
             if zeros >= 2 && byte <= 2 {
-                return Err(invalid());
+                return Err(refused(OutputCheck::EmulationPrevention));
             }
             rbsp.push(byte);
             zeros = if byte == 0 { zeros + 1 } else { 0 };
@@ -270,7 +286,7 @@ impl Bits {
 }
 
 fn sps(nal: &[u8]) -> Result<(u32, u32, u32), Error> {
-    let mut b = Bits::new(nal)?;
+    let mut b = Bits::new(nal, false)?;
     let profile = b.take(8)?;
     b.take(16)?; // Constraint flags and level_idc.
     let id = b.ue()?;
@@ -360,7 +376,7 @@ fn sps(nal: &[u8]) -> Result<(u32, u32, u32), Error> {
     // A tiny displayed crop must not hide an oversized coded allocation from
     // the decoder; bound coded dimensions as well as the displayed dimensions.
     if w > 8192 || h > 8192 || crop_x >= 16 || crop_y >= 16 {
-        return Err(invalid());
+        return Err(refused(OutputCheck::Geometry));
     }
     let width = w
         .checked_sub(crop_x)
@@ -383,7 +399,133 @@ mod tests {
             &b"\x67\x42\x00\x29\xf4\x00\x20\x01\x3c\x00\x3f\xc3\xa0"[..],
             &b"\x67\x42\x00\x29\xf4\x04\x04\xf0\x1c\x3a"[..],
         ] {
-            assert!(super::sps(nal).is_err());
+            assert_eq!(
+                super::sps(nal),
+                Err(super::Error::invalid_output(super::OutputCheck::Geometry)),
+                "{nal:02x?}"
+            );
+        }
+    }
+
+    /// Independent NAL encapsulation from H.264 (V16) 7.4.1, step 1: insert 0x03
+    /// before 0x00..=0x03 after two zero bytes, then append a final 0x03 when
+    /// the RBSP ends in 0x00. It shares no code with `Bits::new`.
+    fn encapsulate(header: u8, rbsp: &[u8]) -> Vec<u8> {
+        let mut nal = vec![header];
+        let mut zeros = 0;
+        for &byte in rbsp {
+            if zeros >= 2 && byte <= 3 {
+                nal.push(3);
+                zeros = 0;
+            }
+            nal.push(byte);
+            zeros = if byte == 0 { zeros + 1 } else { 0 };
+        }
+        if rbsp.last() == Some(&0) {
+            nal.push(3);
+        }
+        nal
+    }
+
+    #[test]
+    fn final_emulation_byte_is_accepted_only_after_a_cabac_slice_zero_word() {
+        // 0x80: rbsp_stop_one_bit plus alignment; then k cabac_zero_words.
+        for k in 1..=3 {
+            let rbsp = [&[0x88, 0x84, 0x80][..], &vec![0; 2 * k][..]].concat();
+            for header in [0x65, 0x41] {
+                let nal = encapsulate(header, &rbsp);
+                assert!(nal.ends_with(&[0, 0, 3]));
+                assert_eq!(super::Bits::new(&nal, true).unwrap().rbsp, rbsp);
+                assert!(super::Bits::new(&nal, false).is_err(), "CAVLC/SPS/PPS");
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_or_truncated_emulation_sequences_stay_rejected() {
+        for nal in [
+            &[0x65, 0x88, 0x00, 0x00, 0x03, 0x04][..], // 0x000003 + byte > 3 (7.4.1)
+            &[0x65, 0x88, 0x00, 0x00, 0x00, 0x80],     // 0x000000
+            &[0x65, 0x88, 0x00, 0x00, 0x01, 0x80],     // 0x000001
+            &[0x65, 0x88, 0x00, 0x00, 0x02, 0x80],     // 0x000002
+            &[0x65, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00], // escaped, then raw 0x000000
+            &[0x65],                                   // empty RBSP
+        ] {
+            assert!(super::Bits::new(nal, true).is_err(), "{nal:02x?}");
+        }
+        // A trailing 0x03 after a single zero is data, not an emulation byte.
+        let data = super::Bits::new(&[0x65, 0x88, 0x00, 0x03], false).unwrap();
+        assert_eq!(data.rbsp, [0x88, 0x00, 0x03]);
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn encapsulated_rbsp_round_trips(
+            body in proptest::collection::vec(proptest::prelude::any::<u8>(), 0..256),
+            stop in 1u8..=255,
+            zero_words in 0usize..4,
+        ) {
+            // A slice RBSP ends in a nonzero trailing-bits byte, then cabac_zero_words.
+            let rbsp = [&body[..], &[stop][..], &vec![0; 2 * zero_words][..]].concat();
+            let nal = encapsulate(0x65, &rbsp);
+            proptest::prop_assert_eq!(super::Bits::new(&nal, true).unwrap().rbsp, rbsp.clone());
+            proptest::prop_assert_eq!(super::Bits::new(&nal, false).is_ok(), zero_words == 0);
+        }
+    }
+}
+
+/// VALIDATION-PLAN B3-2: an independent encoder's CABAC stream that an
+/// independent decoder decodes identically with and without zero-word tails.
+#[cfg(test)]
+mod independent_cabac_stream {
+    #[test]
+    fn every_access_unit_is_accepted_and_keeps_its_zero_word_tail() {
+        // libx264 High profile, 64x64, IDR + 2 P; cabac-zwK.264 appends
+        // (00 00 03)*K to every slice. Provenance: tests/fixtures/h264-cabac.
+        let streams: [(usize, &[u8]); 3] = [
+            (
+                0,
+                include_bytes!("../../tests/fixtures/h264-cabac/cabac.264"),
+            ),
+            (
+                1,
+                include_bytes!("../../tests/fixtures/h264-cabac/cabac-zw1.264"),
+            ),
+            (
+                2,
+                include_bytes!("../../tests/fixtures/h264-cabac/cabac-zw2.264"),
+            ),
+        ];
+        for (k, stream) in streams {
+            let mut annexb = super::AnnexB::default();
+            let mut unit = Vec::new();
+            let mut frames = 0;
+            for nal in super::split(stream).unwrap() {
+                unit.extend_from_slice(&[0, 0, 0, 1]);
+                unit.extend_from_slice(nal);
+                if !matches!(nal[0] & 31, 1 | 5) {
+                    continue;
+                }
+                let idr = nal[0] & 31 == 5;
+                let output = annexb
+                    .normalize(&unit, 64, 64, frames == 0, idr)
+                    .unwrap_or_else(|e| panic!("k={k} frame={frames}: {e:?}"));
+                assert_eq!(output.is_idr, idr, "k={k} frame={frames}");
+                let slices: Vec<_> = super::split(&output.bytes)
+                    .unwrap()
+                    .into_iter()
+                    .filter(|n| matches!(n[0] & 31, 1 | 5))
+                    .collect();
+                assert_eq!(slices.len(), 1, "k={k} frame={frames}");
+                assert!(nal.ends_with(&[0u8, 0, 3].repeat(k)), "k={k}: fixture tail");
+                assert_eq!(
+                    slices[0], nal,
+                    "k={k} frame={frames}: slice and zero-word tail must pass unchanged"
+                );
+                unit.clear();
+                frames += 1;
+            }
+            assert_eq!(frames, 3, "k={k}");
         }
     }
 }

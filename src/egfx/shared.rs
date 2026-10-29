@@ -207,8 +207,21 @@ impl EgfxShared {
         self.gfx_ever_ready.store(true, Ordering::Release);
     }
 
-    /// Returns true after the bounded activation wait has expired.
-    pub(crate) fn bitmap_fallback_due(&self, now: Instant) -> bool {
+    /// Returns true after the bounded activation wait has expired. The caller
+    /// names what it does then; that consequence is logged once.
+    pub(crate) fn bitmap_fallback_due(&self, now: Instant, consequence: &'static str) -> bool {
+        self.activation_wait_expired(now, Some(consequence))
+    }
+
+    /// The same deadline without the one-shot warning: DMA-BUF capture logs
+    /// its own fallback, and SHM capture still owes the warning about what it
+    /// sends instead.
+    #[cfg(feature = "vaapi")]
+    pub(crate) fn dmabuf_fallback_due(&self, now: Instant) -> bool {
+        self.activation_wait_expired(now, None)
+    }
+
+    fn activation_wait_expired(&self, now: Instant, consequence: Option<&'static str>) -> bool {
         if self.gfx_ever_ready.load(Ordering::Acquire) {
             return true;
         }
@@ -222,10 +235,13 @@ impl EgfxShared {
         }
         drop(started);
 
+        let Some(consequence) = consequence else {
+            return true;
+        };
         if !self.gfx_fallback_logged.swap(true, Ordering::AcqRel) {
             tracing::warn!(
                 waited_ms = waited.as_millis(),
-                "The client has not opened the graphics pipeline; sending bitmap updates instead"
+                "The client has not opened the graphics pipeline; {consequence}"
             );
         }
         true
@@ -308,13 +324,35 @@ impl EgfxShared {
         (queued >= max).then_some(EgfxFrameReadiness::OutputBackpressure { queued, max })
     }
 
+    #[cfg(test)]
     pub(in crate::egfx) fn record_frame_queued(&self, frame_id: u32) {
+        self.reserve_frame_in_flight();
+        self.commit_frame_queued(frame_id);
+    }
+
+    /// Charge the local window for a frame IronRDP tracks. Called under the
+    /// GraphicsPipelineServer lock, before the transport can see the frame:
+    /// the IronRDP task may process its FrameAcknowledge as soon as it is sent.
+    pub(in crate::egfx) fn reserve_frame_in_flight(&self) {
+        self.frames_in_flight.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// Release the reservation of a frame the transport never accepted. Nothing
+    /// else was recorded for it. Saturating: a concurrent clear/reset or a
+    /// suspended acknowledgement may already have emptied the window.
+    pub(in crate::egfx) fn release_unsent_frame(&self) {
+        let _ = self
+            .frames_in_flight
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1));
+    }
+
+    /// Record a frame the transport accepted after `reserve_frame_in_flight`.
+    pub(in crate::egfx) fn commit_frame_queued(&self, frame_id: u32) {
         self.last_queued_frame_id.store(frame_id, Ordering::Release);
-        let in_flight = self.frames_in_flight.fetch_add(1, Ordering::AcqRel) + 1;
         let total_queued = self.total_queued_frames.fetch_add(1, Ordering::AcqRel) + 1;
         tracing::trace!(
             frame_id,
-            in_flight,
+            in_flight = self.frames_in_flight(),
             total_queued,
             client_queue_depth = self.client_queue_depth(),
             ack_suspended = self.frame_ack_suspended(),
@@ -329,9 +367,25 @@ impl EgfxShared {
         self.frame_ack_suspended
             .store(ack_suspended, Ordering::Release);
 
-        if self.ack_cutoff_active.load(Ordering::Acquire)
-            && frame_id <= self.ack_cutoff_frame_id.load(Ordering::Acquire)
-        {
+        let stale = self.ack_cutoff_active.load(Ordering::Acquire)
+            && frame_id <= self.ack_cutoff_frame_id.load(Ordering::Acquire);
+
+        // IronRDP forwards a suspend, even one naming a frame from before a
+        // graphics reset, only after it stopped tracking every frame in flight.
+        // Empty the local window too; the stale-ACK cutoff must not keep it.
+        if ack_suspended {
+            if !stale {
+                self.last_acked_frame_id.store(frame_id, Ordering::Release);
+            }
+            let queued = self.total_queued_frames.load(Ordering::Acquire);
+            self.total_acked_frames.store(queued, Ordering::Release);
+            self.frames_in_flight.store(0, Ordering::Release);
+            self.frame_ack_stream_established
+                .store(false, Ordering::Release);
+            return;
+        }
+
+        if stale {
             tracing::trace!(
                 frame_id,
                 cutoff = self.ack_cutoff_frame_id.load(Ordering::Acquire),
@@ -341,14 +395,6 @@ impl EgfxShared {
         }
 
         self.last_acked_frame_id.store(frame_id, Ordering::Release);
-        if ack_suspended {
-            let queued = self.total_queued_frames.load(Ordering::Acquire);
-            self.total_acked_frames.store(queued, Ordering::Release);
-            self.frames_in_flight.store(0, Ordering::Release);
-            self.frame_ack_stream_established
-                .store(false, Ordering::Release);
-            return;
-        }
 
         self.frame_ack_stream_established
             .store(true, Ordering::Release);
@@ -454,10 +500,14 @@ mod tests {
         let shared = shared();
         let start = Instant::now();
 
-        assert!(!shared.bitmap_fallback_due(start));
-        assert!(!shared.bitmap_fallback_due(start + GFX_READY_GRACE - Duration::from_millis(1)));
-        assert!(shared.bitmap_fallback_due(start + GFX_READY_GRACE));
-        assert!(shared.bitmap_fallback_due(start + GFX_READY_GRACE + Duration::from_secs(1)));
+        assert!(!shared.bitmap_fallback_due(start, "test"));
+        assert!(
+            !shared.bitmap_fallback_due(start + GFX_READY_GRACE - Duration::from_millis(1), "test")
+        );
+        assert!(shared.bitmap_fallback_due(start + GFX_READY_GRACE, "test"));
+        assert!(
+            shared.bitmap_fallback_due(start + GFX_READY_GRACE + Duration::from_secs(1), "test")
+        );
     }
 
     #[test]
@@ -465,13 +515,13 @@ mod tests {
         let shared = shared();
         let start = Instant::now();
 
-        assert!(!shared.bitmap_fallback_due(start));
+        assert!(!shared.bitmap_fallback_due(start, "test"));
         shared.note_gfx_ready();
-        assert!(shared.bitmap_fallback_due(start + Duration::from_millis(1)));
+        assert!(shared.bitmap_fallback_due(start + Duration::from_millis(1), "test"));
 
         shared.reset_for_new_client();
         let next = start + Duration::from_secs(1);
-        assert!(!shared.bitmap_fallback_due(next));
-        assert!(shared.bitmap_fallback_due(next + GFX_READY_GRACE));
+        assert!(!shared.bitmap_fallback_due(next, "test"));
+        assert!(shared.bitmap_fallback_due(next + GFX_READY_GRACE, "test"));
     }
 }

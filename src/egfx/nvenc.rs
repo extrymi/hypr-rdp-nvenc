@@ -56,9 +56,7 @@ impl NvencEncoder {
             fps,
         };
         let root = runtime_root()?;
-        let mut command = tokio::process::Command::new(std::env::current_exe()?);
-        command.arg(nvenc::WORKER_ARGUMENT);
-        Self::with_command(config, &root, command, Deadlines::default())
+        Self::with_command(config, &root, worker_command()?, Deadlines::default())
     }
 
     fn with_command(
@@ -104,6 +102,13 @@ impl NvencEncoder {
     pub fn force_idr(&mut self) {
         self.force_idr = true;
     }
+}
+
+/// Private worker invocation of this server's own executable.
+pub(crate) fn worker_command() -> std::io::Result<tokio::process::Command> {
+    let mut command = tokio::process::Command::new(crate::SELF_EXECUTABLE);
+    command.arg0("hypr-rdp").arg(nvenc::WORKER_ARGUMENT);
+    Ok(command)
 }
 
 fn runtime_root() -> Result<PathBuf> {

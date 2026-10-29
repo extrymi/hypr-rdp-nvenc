@@ -260,3 +260,105 @@ fn fallback_requires_a_classified_fault_and_confirmed_exit() {
         .into()
     ));
 }
+
+/// pacman extracts with ARCHIVE_EXTRACT_UNLINK: an upgrade unlinks the running
+/// executable's pathname and creates a new inode there. A private copy of this
+/// test binary replaces its own pathname, then both production self-exec paths
+/// must still start the running image (same inode), not the replacement.
+#[test]
+fn self_exec_paths_survive_replacement_of_the_running_executable() {
+    let directory = std::env::temp_dir().join(format!(
+        "hypr-rdp-self-exec-{}-{}",
+        std::process::id(),
+        NEXT_DIR.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&directory).unwrap();
+    let copy = directory.join("hypr-rdp-under-test");
+    std::fs::copy(std::env::current_exe().unwrap(), &copy).unwrap();
+    let status = std::process::Command::new(&copy)
+        .args([
+            "--exact",
+            "egfx::nvenc::tests::fixture_self_exec_parent",
+            "--ignored",
+            "--nocapture",
+        ])
+        .env("HYPR_RDP_SELF_EXEC_PARENT", "1")
+        .status()
+        .unwrap();
+    std::fs::remove_dir_all(&directory).unwrap();
+    assert!(status.success());
+}
+
+#[test]
+#[ignore = "subprocess fixture"]
+fn fixture_self_exec_parent() {
+    use std::os::unix::fs::MetadataExt;
+    if std::env::var_os("HYPR_RDP_SELF_EXEC_PARENT").is_none() {
+        return;
+    }
+    let image = std::fs::metadata("/proc/self/exe").unwrap().ino();
+    // PamValidator resolves its helper once at server start, before an upgrade.
+    let helper_at_start = crate::server::auth::helper_executable().unwrap();
+    let path = std::env::current_exe().unwrap();
+    std::fs::remove_file(&path).unwrap();
+    std::fs::write(&path, b"replacement package payload").unwrap();
+    let worker = super::worker_command().unwrap();
+    let programs = [
+        ("NVENC worker", worker.as_std().get_program().to_owned()),
+        (
+            "PAM helper resolved at start",
+            helper_at_start.into_os_string(),
+        ),
+        (
+            "PAM helper resolved now",
+            crate::server::auth::helper_executable()
+                .unwrap()
+                .into_os_string(),
+        ),
+    ];
+    let mut failures = Vec::new();
+    for (role, program) in programs {
+        let output = match std::process::Command::new(&program)
+            .args([
+                "--exact",
+                "egfx::nvenc::tests::fixture_self_exec_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("HYPR_RDP_SELF_EXEC_CHILD", "1")
+            .output()
+        {
+            Ok(output) => output,
+            Err(error) => {
+                failures.push(format!(
+                    "{role}: spawn {program:?} after replacement: {error}"
+                ));
+                continue;
+            }
+        };
+        let reported = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .find_map(|line| line.strip_prefix("self-exec-inode="))
+            .and_then(|inode| inode.parse::<u64>().ok());
+        if !output.status.success() || reported != Some(image) {
+            failures.push(format!(
+                "{role}: {program:?} ran image {reported:?}, expected {image}"
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "self-exec after replacement: {failures:#?}"
+    );
+}
+
+#[test]
+#[ignore = "subprocess fixture"]
+fn fixture_self_exec_child() {
+    use std::os::unix::fs::MetadataExt;
+    if std::env::var_os("HYPR_RDP_SELF_EXEC_CHILD").is_none() {
+        return;
+    }
+    let image = std::fs::metadata("/proc/self/exe").unwrap().ino();
+    println!("self-exec-inode={image}");
+}

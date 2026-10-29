@@ -173,7 +173,8 @@ static NVENCSTATUS NVENCAPI lock_output(void *s, NV_ENC_LOCK_BITSTREAM *p) {
     (void)s; if (event("lock-output") || p->version != NV_ENC_LOCK_BITSTREAM_VER || p->doNotWait) return NV_ENC_ERR_GENERIC;
     Output *o = p->outputBitstream; if (o->locked) return NV_ENC_ERR_INVALID_PARAM; o->locked = 1;
     p->bitstreamBufferPtr = mode == 4 ? NULL : packet; p->bitstreamSizeInBytes = mode == 3 ? 17000000 : packet_size;
-    p->outputTimeStamp = o->timestamp + (mode == 2); p->frameIdx = o->index;
+    p->outputTimeStamp = o->timestamp + (mode == 2); p->frameIdx = o->index + (mode == 15);
+    p->hwEncodeStatus = mode == 14;
     p->pictureType = mode == 8 ? NV_ENC_PIC_TYPE_B : (o->idr ? NV_ENC_PIC_TYPE_IDR : NV_ENC_PIC_TYPE_P);
     return NV_ENC_SUCCESS;
 }

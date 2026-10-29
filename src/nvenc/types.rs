@@ -158,12 +158,54 @@ pub enum Error {
     },
 }
 
+/// Which check refused encoder output: the `code` of an `Error::Backend` with
+/// `Fault::InvalidOutput`. NVENC and CUDA statuses are reported only with other
+/// faults, so these values never alias a driver status; 0 means unclassified.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(i32)]
+pub enum OutputCheck {
+    /// Locked input mapping is null or its pitch is outside width..=131072.
+    InputMapping = 1,
+    /// Locked bitstream pointer is null.
+    BitstreamPointer = 2,
+    /// Bitstream size is zero or above the output limit.
+    BitstreamSize = 3,
+    /// NV_ENC_LOCK_BITSTREAM::hwEncodeStatus is nonzero.
+    EncodeStatus = 4,
+    /// Output timestamp differs from the submitted sequence.
+    Timestamp = 5,
+    /// Output frameIdx differs from the submitted sequence.
+    FrameIndex = 6,
+    /// Picture type is not IDR, I or P.
+    PictureType = 7,
+    /// Annex B framing, parameter set or slice structure.
+    AnnexB = 8,
+    /// Forbidden or misplaced emulation prevention sequence.
+    EmulationPrevention = 9,
+    /// SPS size: the displayed size differs from the configured size, or the
+    /// coded size is out of bounds.
+    Geometry = 10,
+    /// Slices and driver picture type disagree about IDR, or the slices of a
+    /// requested IDR are not IDR.
+    IdrAgreement = 11,
+    /// Engine bounds: empty or oversized unit, or a requested IDR is missing.
+    EngineOutput = 12,
+}
+
 impl Error {
     pub fn backend(phase: Phase, fault: Fault) -> Self {
         Self::Backend {
             phase,
             fault,
             code: 0,
+        }
+    }
+
+    pub fn invalid_output(check: OutputCheck) -> Self {
+        Self::Backend {
+            phase: Phase::Encode,
+            fault: Fault::InvalidOutput,
+            code: check as i32,
         }
     }
 }

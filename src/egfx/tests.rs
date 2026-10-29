@@ -1,9 +1,10 @@
 use super::factory::{capability_avc_support, preferred_capabilities_for_policy};
 use super::test_support::{
     ack_frame, assert_wire_to_surface_frame, decode_avc444_wire_to_surface, decode_gfx_output,
-    drain_gfx_pdus, negotiated_avc420_session, ready_avc420_session, ready_avc444_handle,
+    drain_gfx_pdus, negotiated_avc420_session, process_avc420_capabilities,
+    process_avc444_capabilities, ready_avc420_session, ready_avc444_handle,
     ready_tracked_avc420_session, tracked_avc444_session, unnegotiated_egfx_session,
-    TEST_CHANNEL_ID,
+    TestGfxSession, TEST_CHANNEL_ID,
 };
 use super::*;
 use ironrdp_core::{encode_vec, Decode, Encode, ReadCursor};
@@ -228,6 +229,7 @@ fn avc420_rdpegfx_queue_emits_logical_frame_wire_shape() {
 
     let regions = [Avc420Region::new(4, 6, 20, 22, 19, 81)];
     let queued = EgfxShared::queue_avc420_rdpegfx_frame(
+        None,
         &handle,
         surface_id,
         &[0, 0, 1, 0x65, 0xaa, 0xbb],
@@ -565,7 +567,9 @@ fn tracked_queue_policy_honors_client_ack_suspend() {
         &regions,
         125,
     ));
-    assert_eq!(shared.frames_in_flight(), 2);
+    // IronRDP does not track frames while ACKs are suspended and would never
+    // forward their ACKs after resume, so they do not charge the window.
+    assert_eq!(shared.frames_in_flight(), 0);
     assert!(shared.can_send_frame(&handle));
 }
 
@@ -628,6 +632,7 @@ fn avc444v2_rdpegfx_queue_emits_logical_frame_wire_shape() {
     let stream2_regions = [Avc420Region::new(16, 8, 64, 48, 22, 78)];
 
     let queued = EgfxShared::queue_avc444_rdpegfx_frame(
+        None,
         &handle,
         surface_id,
         Encoding::LUMA_AND_CHROMA,
@@ -828,6 +833,7 @@ fn avc444_rdpegfx_queue_maps_luma_and_chroma_to_wire_payload() {
     let stream2_regions = [Avc420Region::new(16, 8, 64, 48, 22, 78)];
 
     let queued = EgfxShared::queue_avc444_rdpegfx_frame(
+        None,
         &handle,
         surface_id,
         Encoding::LUMA_AND_CHROMA,
@@ -880,6 +886,7 @@ fn avc444_rdpegfx_queue_allows_empty_h264_payloads_with_regions() {
     let stream2_regions = [Avc420Region::new(16, 8, 64, 48, 22, 78)];
 
     let queued = EgfxShared::queue_avc444_rdpegfx_frame(
+        None,
         &handle,
         surface_id,
         Encoding::LUMA_AND_CHROMA,
@@ -914,6 +921,7 @@ fn avc444_rdpegfx_queue_maps_luma_only_and_chroma_only_to_stream1() {
         let (handle, surface_id) = ready_avc444_handle(64, 64);
         let regions = [Avc420Region::new(4, 6, 20, 22, 18, 82)];
         let queued = EgfxShared::queue_avc444_rdpegfx_frame(
+            None,
             &handle,
             surface_id,
             wire_encoding,
@@ -1976,4 +1984,292 @@ fn clearcodec_transport_backpressure_and_suspended_ack_preserve_sequence() {
             &damage,
         );
     }
+}
+
+/// Installs the publication hook for one test and always removes it.
+struct PublishHook;
+
+impl PublishHook {
+    fn install(hook: impl FnMut(u32) + 'static) -> Self {
+        super::rdpegfx::AFTER_PUBLISH.with_borrow_mut(|slot| *slot = Some(Box::new(hook)));
+        Self
+    }
+}
+
+impl Drop for PublishHook {
+    fn drop(&mut self) {
+        super::rdpegfx::AFTER_PUBLISH.with_borrow_mut(|slot| *slot = None);
+    }
+}
+
+/// Acknowledges each published frame through the real DVC/IronRDP path
+/// before the sending thread returns from the transport send.
+fn ack_inside_publication_window(
+    bridge: ironrdp_server::GfxDvcBridge,
+) -> (PublishHook, std::rc::Rc<std::cell::Cell<u32>>) {
+    let bridge = std::cell::RefCell::new(bridge);
+    let acked = std::rc::Rc::new(std::cell::Cell::new(0));
+    let counter = std::rc::Rc::clone(&acked);
+    let hook = PublishHook::install(move |frame_id| {
+        ack_frame(
+            &mut bridge.borrow_mut(),
+            frame_id,
+            QueueDepth::AvailableBytes(8),
+        );
+        counter.set(counter.get() + 1);
+    });
+    (hook, acked)
+}
+
+#[test]
+fn avc420_ack_inside_publication_window_releases_local_window() {
+    let (shared, bridge, handle, surface_id, event_tx, mut event_rx) =
+        ready_tracked_avc420_session(64, 64, DEFAULT_MAX_FRAMES_IN_FLIGHT);
+    let _ = drain_gfx_pdus(&mut event_rx);
+    let regions = [Avc420Region::new(0, 0, 64, 64, 21, 79)];
+    let (_hook, acked) = ack_inside_publication_window(bridge);
+
+    for timestamp in 0..2 * DEFAULT_MAX_FRAMES_IN_FLIGHT {
+        assert!(shared.send_tracked_avc420_rdpegfx_frame(
+            &handle,
+            &event_tx,
+            surface_id,
+            &[0, 0, 1, 0x65, 0xaa],
+            &regions,
+            timestamp,
+        ));
+        assert_eq!(
+            shared.frames_in_flight(),
+            0,
+            "ACK for frame {timestamp} was lost"
+        );
+        // Delivered output releases its queue lease, as the transport would.
+        let _ = drain_gfx_pdus(&mut event_rx);
+    }
+    assert_eq!(acked.get(), 2 * DEFAULT_MAX_FRAMES_IN_FLIGHT);
+    assert!(shared.full_frame_refresh_readiness().is_ready());
+}
+
+#[test]
+fn avc444_ack_inside_publication_window_releases_local_window() {
+    let TestGfxSession {
+        shared,
+        bridge,
+        handle,
+        event_tx,
+        mut event_rx,
+    } = tracked_avc444_session(64, 64, DEFAULT_MAX_FRAMES_IN_FLIGHT);
+    let surface_id = EgfxShared::init_surface(&handle, &event_tx, 64, 64).expect("surface init");
+    let _ = drain_gfx_pdus(&mut event_rx);
+    let regions = [Avc420Region::new(0, 0, 64, 64, 21, 79)];
+    let (_hook, acked) = ack_inside_publication_window(bridge);
+
+    assert!(shared.send_tracked_avc444_rdpegfx_frame(
+        &handle,
+        &event_tx,
+        surface_id,
+        Avc444FrameEncoding::Luma,
+        &[0, 0, 1, 0x65, 0xaa],
+        &regions,
+        None,
+        None,
+        123,
+    ));
+    assert_eq!(acked.get(), 1);
+    assert_eq!(
+        shared.frames_in_flight(),
+        0,
+        "AVC444 ACK inside the publication window was lost"
+    );
+}
+
+#[test]
+fn rejected_publication_leaves_no_local_charge() {
+    let (shared, _bridge, handle, surface_id, event_tx, mut event_rx) =
+        ready_tracked_avc420_session(64, 64, DEFAULT_MAX_FRAMES_IN_FLIGHT);
+    let _ = drain_gfx_pdus(&mut event_rx);
+    drop(event_rx);
+    let regions = [Avc420Region::new(0, 0, 64, 64, 21, 79)];
+    let before = shared.frame_flow_snapshot();
+    assert!(!shared.send_tracked_avc420_rdpegfx_frame(
+        &handle,
+        &event_tx,
+        surface_id,
+        &[0, 0, 1, 0x65, 0xaa],
+        &regions,
+        123,
+    ));
+    assert_eq!(shared.frame_flow_snapshot(), before);
+}
+
+/// Installs the post-queue hook for one test and always removes it.
+struct QueueHook;
+
+impl QueueHook {
+    fn install(hook: impl FnMut(u32) + 'static) -> Self {
+        super::rdpegfx::AFTER_QUEUE.with_borrow_mut(|slot| *slot = Some(Box::new(hook)));
+        Self
+    }
+}
+
+impl Drop for QueueHook {
+    fn drop(&mut self) {
+        super::rdpegfx::AFTER_QUEUE.with_borrow_mut(|slot| *slot = None);
+    }
+}
+
+/// IronRDP discarded the frame with a graphics reset in the window after
+/// queueing, so its ACK is ignored. No local charge may remain for it.
+fn assert_no_charge_after_reset(
+    shared: &EgfxShared,
+    bridge: &std::cell::RefCell<ironrdp_server::GfxDvcBridge>,
+    frame_id: u32,
+    reset: &str,
+) {
+    ack_frame(
+        &mut bridge.borrow_mut(),
+        frame_id,
+        QueueDepth::AvailableBytes(8),
+    );
+    assert_eq!(
+        shared.frames_in_flight(),
+        0,
+        "{reset} after queue left a phantom charge"
+    );
+    assert!(shared.full_frame_refresh_readiness().is_ready(), "{reset}");
+}
+
+#[test]
+fn avc420_caps_readvertise_after_queue_leaves_no_phantom_charge() {
+    let (shared, bridge, handle, surface_id, event_tx, mut event_rx) =
+        ready_tracked_avc420_session(64, 64, DEFAULT_MAX_FRAMES_IN_FLIGHT);
+    let _ = drain_gfx_pdus(&mut event_rx);
+    let regions = [Avc420Region::new(0, 0, 64, 64, 21, 79)];
+    let bridge = std::rc::Rc::new(std::cell::RefCell::new(bridge));
+    let queued = std::rc::Rc::new(std::cell::Cell::new(None));
+    let _hook = {
+        let (bridge, queued) = (std::rc::Rc::clone(&bridge), std::rc::Rc::clone(&queued));
+        // mstsc decoder recovery: a mid-session CapsAdvertise waiting for the
+        // server lock runs as soon as queue_rdpegfx_frame releases it.
+        QueueHook::install(move |frame_id| {
+            process_avc420_capabilities(&mut bridge.borrow_mut());
+            queued.set(Some(frame_id));
+        })
+    };
+    assert!(shared.send_tracked_avc420_rdpegfx_frame(
+        &handle,
+        &event_tx,
+        surface_id,
+        &[0, 0, 1, 0x65, 0xaa],
+        &regions,
+        123,
+    ));
+    let frame_id = queued.get().expect("hook ran after queueing");
+    assert_no_charge_after_reset(&shared, &bridge, frame_id, "AVC420 CapsAdvertise");
+}
+
+#[test]
+fn avc444_caps_readvertise_after_queue_leaves_no_phantom_charge() {
+    let TestGfxSession {
+        shared,
+        bridge,
+        handle,
+        event_tx,
+        mut event_rx,
+    } = tracked_avc444_session(64, 64, DEFAULT_MAX_FRAMES_IN_FLIGHT);
+    let surface_id = EgfxShared::init_surface(&handle, &event_tx, 64, 64).expect("surface init");
+    let _ = drain_gfx_pdus(&mut event_rx);
+    let regions = [Avc420Region::new(0, 0, 64, 64, 21, 79)];
+    let bridge = std::rc::Rc::new(std::cell::RefCell::new(bridge));
+    let queued = std::rc::Rc::new(std::cell::Cell::new(None));
+    let _hook = {
+        let (bridge, queued) = (std::rc::Rc::clone(&bridge), std::rc::Rc::clone(&queued));
+        QueueHook::install(move |frame_id| {
+            process_avc444_capabilities(&mut bridge.borrow_mut());
+            queued.set(Some(frame_id));
+        })
+    };
+    assert!(shared.send_tracked_avc444_rdpegfx_frame(
+        &handle,
+        &event_tx,
+        surface_id,
+        Avc444FrameEncoding::Luma,
+        &[0, 0, 1, 0x65, 0xaa],
+        &regions,
+        None,
+        None,
+        123,
+    ));
+    let frame_id = queued.get().expect("hook ran after queueing");
+    assert_no_charge_after_reset(&shared, &bridge, frame_id, "AVC444 CapsAdvertise");
+}
+
+#[test]
+fn avc420_resize_after_queue_leaves_no_phantom_charge() {
+    let (shared, bridge, handle, surface_id, event_tx, mut event_rx) =
+        ready_tracked_avc420_session(64, 64, DEFAULT_MAX_FRAMES_IN_FLIGHT);
+    let _ = drain_gfx_pdus(&mut event_rx);
+    let regions = [Avc420Region::new(0, 0, 64, 64, 21, 79)];
+    let queued = std::rc::Rc::new(std::cell::Cell::new(None));
+    let _hook = {
+        let (resizer, queued) = (Arc::clone(&shared), std::rc::Rc::clone(&queued));
+        // The display thread resizes between queueing and local accounting.
+        QueueHook::install(move |frame_id| {
+            resizer.prepare_for_resize(64, 64);
+            queued.set(Some(frame_id));
+        })
+    };
+    assert!(shared.send_tracked_avc420_rdpegfx_frame(
+        &handle,
+        &event_tx,
+        surface_id,
+        &[0, 0, 1, 0x65, 0xaa],
+        &regions,
+        123,
+    ));
+    let frame_id = queued.get().expect("hook ran after queueing");
+    let bridge = std::cell::RefCell::new(bridge);
+    assert_no_charge_after_reset(&shared, &bridge, frame_id, "resize");
+}
+
+#[test]
+fn late_suspend_ack_for_a_frame_before_a_graphics_reset_clears_the_window() {
+    let (shared, mut bridge, handle, surface_id, event_tx, mut event_rx) =
+        ready_tracked_avc420_session(64, 64, DEFAULT_MAX_FRAMES_IN_FLIGHT);
+    let _ = drain_gfx_pdus(&mut event_rx);
+    let regions = [Avc420Region::new(0, 0, 64, 64, 21, 79)];
+    let send = |surface_id, value| {
+        assert!(shared.send_tracked_avc420_rdpegfx_frame(
+            &handle,
+            &event_tx,
+            surface_id,
+            &[0, 0, 1, 0x65, value],
+            &regions,
+            u32::from(value),
+        ));
+        shared.frame_flow_snapshot().last_queued_frame_id
+    };
+    let before_reset = send(surface_id, 1);
+    let _ = drain_gfx_pdus(&mut event_rx);
+    // The unacknowledged frame becomes the stale-ACK cutoff of the reset.
+    process_avc420_capabilities(&mut bridge);
+    let surface_id = shared
+        .init_or_reuse_surface(&handle, &event_tx, 64, 64)
+        .expect("surface after reset");
+    let _ = drain_gfx_pdus(&mut event_rx);
+    let after_reset = [send(surface_id, 2), send(surface_id, 3)];
+    let _ = drain_gfx_pdus(&mut event_rx);
+    assert_eq!(shared.frames_in_flight(), 2);
+    // IronRDP accepts a late suspend for an issued frame and drops its tracking
+    // of the frames after the reset; only the first resuming ACK is forwarded.
+    ack_frame(&mut bridge, before_reset, QueueDepth::Suspend);
+    for frame_id in after_reset {
+        ack_frame(&mut bridge, frame_id, QueueDepth::AvailableBytes(8));
+    }
+    assert_eq!(
+        shared.frames_in_flight(),
+        0,
+        "late suspend ACK before the reset cutoff left charges after resume"
+    );
+    assert!(shared.full_frame_refresh_readiness().is_ready());
 }
