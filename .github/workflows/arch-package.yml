@@ -74,10 +74,14 @@ jobs:
         if: steps.arch-cache.outputs.cache-hit == 'true'
         run: |
           python3 - <<'PY'
-          import json, os
+          import json, os, re
           built = json.load(open('artifacts/ARCH-BUILD-PROVENANCE.json'))
+          # The restored package must have been built from this tree's pin.
+          pin = re.findall(r'^_commit=([0-9a-f]{40})$', open('pkg/arch/PKGBUILD').read(), re.M)
+          if pin != [built['runtime_source']]:
+              raise SystemExit(f"reused build came from {built['runtime_source']}, the recipe pins {pin}")
           note = {'run_id': os.environ['GITHUB_RUN_ID'], 'tested_merge': os.environ['GITHUB_SHA'],
-                  'reused_build': built, 'cache_key': os.environ['CACHE_KEY'],
+                  'reused_build': built, 'runtime_source_matches_pin': True, 'cache_key': os.environ['CACHE_KEY'],
                   'note': 'Package build and Rust tests were NOT re-executed in this run; the SHA list only proves the restored files are unchanged since that run.'}
           json.dump(note, open('artifacts/ARCH-BUILD-REUSE.json', 'w'), indent=2)
           print(json.dumps(note, indent=2))
