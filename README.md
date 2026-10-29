@@ -112,7 +112,7 @@ Create `~/.config/hypr-rdp/config.toml`:
 ```toml
 bind = "0.0.0.0:3389"
 username = "user"
-password = "pass"
+password_file = "/home/YOUR_USER/.config/hypr-rdp/password"
 fps = 30
 # resolution = "1920x1080"
 # scale = 2
@@ -123,6 +123,31 @@ fps = 30
 
 CLI arguments override the config file. Use `password_file` instead of `password`
 to read a password from a file, or `--password-file` on the command line.
+Replace `YOUR_USER` with the desktop user's actual name; TOML paths do not expand
+`~` or `$HOME`. The file must be regular, at most 1 MiB including its line ending,
+and have no group/other permissions (`0600` or `0400`). Exactly one final LF or
+CRLF is removed; spaces remain part of the password. A symlink to a private
+regular file is allowed. Password fields are redacted in Debug output; putting
+a literal password on the command line can still expose it in shell history
+and process arguments.
+
+For a new dedicated password file, generate a long random password without
+overwriting an existing one:
+
+```sh
+install -d -m700 "$HOME/.config/hypr-rdp"
+(
+    umask 077
+    set -C
+    openssl rand -base64 24 > "$HOME/.config/hypr-rdp/password"
+)
+```
+
+Keep that file private and provide its password to the RDP client's credential
+prompt through your normal private credential workflow. Configured authentication
+has no application password-attempt backoff. Network admission is managed by the
+operator; the package does not install firewall or subnet rules.
+
 Unknown config keys and invalid values stop startup. Parse diagnostics include
 the location and error category, without printing the source line.
 
@@ -140,6 +165,9 @@ currently valid and match the key. Normal startup creates a default pair only
 when both files are absent. An incomplete or invalid saved pair causes an error;
 restore a known matching pair instead of silently changing the server identity.
 See [migration and rollback](docs/startup-validation.md) for the exact scope.
+The packaged TLS helper's self-signed identity expires after 365 days. Renew it
+before expiry; [renewal and client trust](docs/startup-validation.md#renewal-and-client-trust)
+describes replacing it without deleting the working pair.
 
 To use the desktop user's Linux password, set `auth_mode = "pam"` and remove
 `username`, `password`, and `password_file`. Install the appropriate
@@ -148,6 +176,11 @@ PAM requires a TLS-capable client (FreeRDP: `/sec:tls`, without NLA) and allows
 only the user running the existing desktop, one connection at a time.
 Clients must supply credentials in TLS mode; mstsc may require saved credentials
 in Windows Credential Manager instead of displaying a password prompt.
+
+A rapid reconnect from a just-evicted source IP can encounter IronRDP's
+re-preemption cooldown for up to 30 seconds from eviction. Wait and retry;
+desktop logout is not needed to clear that timer. Reconnect and application
+continuity still require the separate hardware/client acceptance tests.
 
 Common settings are listed below. Config keys use underscores in place of hyphens.
 Run `hypr-rdp --help` for all options.
