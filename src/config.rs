@@ -69,7 +69,7 @@ fn resolve_file_transfer_mode(
     )
 }
 
-#[derive(Parser, Debug)]
+#[derive(Parser)]
 #[command(name = "hypr-rdp", version, about = "Native RDP server for Hyprland")]
 struct Args {
     /// Address to bind the RDP server
@@ -194,7 +194,42 @@ struct Args {
     check_config: bool,
 }
 
-#[derive(Debug, Deserialize, Default)]
+impl std::fmt::Debug for Args {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Args")
+            .field("bind", &self.bind)
+            .field("cert", &self.cert)
+            .field("key", &self.key)
+            .field("auth_mode", &self.auth_mode)
+            .field("pam_service", &self.pam_service)
+            .field("username", &self.username)
+            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .field("password_file", &self.password_file)
+            .field("resolution", &self.resolution)
+            .field("scale", &self.scale)
+            .field("capture_mode", &self.capture_mode)
+            .field("bitrate", &self.bitrate)
+            .field("quality", &self.quality)
+            .field("rate_control", &self.rate_control)
+            .field("fps", &self.fps)
+            .field("max_frames_in_flight", &self.max_frames_in_flight)
+            .field("egfx_codec", &self.egfx_codec)
+            .field("keyboard_layout_policy", &self.keyboard_layout_policy)
+            .field("audio_mode", &self.audio_mode)
+            .field("nvenc_device", &self.nvenc_device)
+            .field("output", &self.output)
+            .field("on_session_start", &self.on_session_start)
+            .field("on_session_end", &self.on_session_end)
+            .field("file_transfer_mode", &self.file_transfer_mode)
+            .field("file_transfer_max_chunk_bytes", &self.file_transfer_max_chunk_bytes)
+            .field("file_transfer_max_entries", &self.file_transfer_max_entries)
+            .field("config", &self.config)
+            .field("check_config", &self.check_config)
+            .finish()
+    }
+}
+
+#[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 struct ConfigFile {
     auth_mode: Option<String>,
@@ -224,6 +259,39 @@ struct ConfigFile {
     file_transfer_mode: Option<String>,
     file_transfer_max_chunk_bytes: Option<u32>,
     file_transfer_max_entries: Option<usize>,
+}
+
+impl std::fmt::Debug for ConfigFile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConfigFile")
+            .field("auth_mode", &self.auth_mode)
+            .field("pam_service", &self.pam_service)
+            .field("bind", &self.bind)
+            .field("cert", &self.cert)
+            .field("key", &self.key)
+            .field("username", &self.username)
+            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .field("password_file", &self.password_file)
+            .field("resolution", &self.resolution)
+            .field("scale", &self.scale)
+            .field("capture_mode", &self.capture_mode)
+            .field("bitrate", &self.bitrate)
+            .field("quality", &self.quality)
+            .field("rate_control", &self.rate_control)
+            .field("fps", &self.fps)
+            .field("max_frames_in_flight", &self.max_frames_in_flight)
+            .field("egfx_codec", &self.egfx_codec)
+            .field("keyboard_layout_policy", &self.keyboard_layout_policy)
+            .field("audio_mode", &self.audio_mode)
+            .field("nvenc_device", &self.nvenc_device)
+            .field("output", &self.output)
+            .field("on_session_start", &self.on_session_start)
+            .field("on_session_end", &self.on_session_end)
+            .field("file_transfer_mode", &self.file_transfer_mode)
+            .field("file_transfer_max_chunk_bytes", &self.file_transfer_max_chunk_bytes)
+            .field("file_transfer_max_entries", &self.file_transfer_max_entries)
+            .finish()
+    }
 }
 
 impl ConfigFile {
@@ -383,10 +451,19 @@ fn resolve_authentication(args: &mut Args, config: &mut ConfigFile) -> anyhow::R
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 pub(crate) struct ConfigCredentials {
     pub username: String,
     pub password: String,
+}
+
+impl std::fmt::Debug for ConfigCredentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConfigCredentials")
+            .field("username", &self.username)
+            .field("password", &"<redacted>")
+            .finish()
+    }
 }
 
 impl ConfigCredentials {
@@ -953,6 +1030,15 @@ mod tests {
         };
         assert_password_debug_is_redacted(&credentials);
         assert_password_debug_is_redacted(&AuthConfig::Configured(Some(credentials)));
+    }
+
+    #[test]
+    fn debug_preserves_absent_passwords() {
+        let args = Args::try_parse_from(["hypr-rdp"]).unwrap();
+        for debug in [format!("{args:?}"), format!("{:?}", ConfigFile::default())] {
+            assert!(debug.contains("password: None"));
+            assert!(!debug.contains("<redacted>"));
+        }
     }
 
     #[test]

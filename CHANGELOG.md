@@ -11,6 +11,8 @@
 
 ### Fixed
 
+- Redact password values in argument, configuration and credential Debug output,
+  including credentials nested in authentication policy; preserve other fields.
 - Reject FIFOs and devices without reading password data or waiting for a FIFO
   writer. Inspect the same opened descriptor that supplies the password and
   bound reads even when a regular file grows after the metadata check.
