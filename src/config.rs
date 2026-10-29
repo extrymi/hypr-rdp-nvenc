@@ -915,7 +915,10 @@ mod tests {
                 "Debug must redact configured passwords"
             );
             assert!(debug.contains("<redacted>"), "missing redaction marker");
-            assert!(debug.contains("visible-user"), "username should remain visible");
+            assert!(
+                debug.contains("visible-user"),
+                "username should remain visible"
+            );
         }
     }
 
