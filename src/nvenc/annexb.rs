@@ -517,13 +517,9 @@ mod independent_cabac_stream {
                     .filter(|n| matches!(n[0] & 31, 1 | 5))
                     .collect();
                 assert_eq!(slices.len(), 1, "k={k} frame={frames}");
-                assert!(
-                    nal.ends_with(&[0u8, 0, 3].repeat(k)),
-                    "k={k}: fixture tail"
-                );
+                assert!(nal.ends_with(&[0u8, 0, 3].repeat(k)), "k={k}: fixture tail");
                 assert_eq!(
-                    slices[0],
-                    nal,
+                    slices[0], nal,
                     "k={k} frame={frames}: slice and zero-word tail must pass unchanged"
                 );
                 unit.clear();
