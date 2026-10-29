@@ -473,3 +473,49 @@ mod tests {
         }
     }
 }
+
+/// VALIDATION-PLAN B3-2: an independent encoder's CABAC stream that an
+/// independent decoder decodes identically with and without zero-word tails.
+#[cfg(test)]
+mod independent_cabac_stream {
+    #[test]
+    fn every_access_unit_is_accepted_and_keeps_its_zero_word_tail() {
+        // libx264 High profile, 64x64, IDR + 2 P; cabac-zwK.264 appends
+        // (00 00 03)*K to every slice. Provenance: tests/fixtures/h264-cabac.
+        let streams: [(usize, &[u8]); 3] = [
+            (0, include_bytes!("../../tests/fixtures/h264-cabac/cabac.264")),
+            (1, include_bytes!("../../tests/fixtures/h264-cabac/cabac-zw1.264")),
+            (2, include_bytes!("../../tests/fixtures/h264-cabac/cabac-zw2.264")),
+        ];
+        for (k, stream) in streams {
+            let mut annexb = super::AnnexB::default();
+            let mut unit = Vec::new();
+            let mut frames = 0;
+            for nal in super::split(stream).unwrap() {
+                unit.extend_from_slice(&[0, 0, 0, 1]);
+                unit.extend_from_slice(nal);
+                if !matches!(nal[0] & 31, 1 | 5) {
+                    continue;
+                }
+                let idr = nal[0] & 31 == 5;
+                let output = annexb
+                    .normalize(&unit, 64, 64, frames == 0, idr)
+                    .unwrap_or_else(|e| panic!("k={k} frame={frames}: {e:?}"));
+                assert_eq!(output.is_idr, idr, "k={k} frame={frames}");
+                let slices: Vec<_> = super::split(&output.bytes)
+                    .unwrap()
+                    .into_iter()
+                    .filter(|n| matches!(n[0] & 31, 1 | 5))
+                    .collect();
+                assert_eq!(slices.len(), 1, "k={k} frame={frames}");
+                assert!(
+                    slices[0].ends_with(&[0u8, 0, 3].repeat(k)),
+                    "k={k} frame={frames}: the cabac_zero_word tail must be kept"
+                );
+                unit.clear();
+                frames += 1;
+            }
+            assert_eq!(frames, 3, "k={k}");
+        }
+    }
+}
