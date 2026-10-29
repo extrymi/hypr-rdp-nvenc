@@ -143,11 +143,28 @@ jobs:
           (root / 'SHA256SUMS').write_text('\n'.join(lines) + '\n')
           PY
 
-      - name: Upload package and lifecycle evidence
+      # The repository is public and the package's licence notices are incomplete
+      # (unresolved records), so package files and executables are not published.
+      # The checked package stays in the workflow cache for build reuse.
+      - name: Refuse to publish executables
+        if: always()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          published = [p for p in Path('artifacts').rglob('*') if p.is_file()
+                       and not p.name.endswith('.pkg.tar.zst') and p.name != 'pam-probe']
+          if bad := [str(p) for p in published if p.open('rb').read(4) == b'\x7fELF']:
+              raise SystemExit(f'executables must not be published: {bad}')
+          PY
+
+      - name: Upload lifecycle evidence without package files or executables
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: arch-package-${{ github.sha }}
-          path: artifacts/
+          path: |
+            artifacts/
+            !artifacts/*.pkg.tar.zst
+            !artifacts/pam-probe
           if-no-files-found: warn
           retention-days: 14

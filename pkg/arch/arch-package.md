@@ -28,10 +28,14 @@ usual for makepkg VCS sources). No floating runtime branch is built. A later
 runtime change requires updating that explicit pin and retesting the package.
 
 CI builds inside a pinned official Arch container against a dated signed Arch
-repository snapshot; `ci/arch.json` declares both. Artifacts contain the package,
-source recipe bundle, `.PKGINFO`, `.BUILDINFO`, file inventory, hashes, linkage,
-compiler/package provenance and lifecycle logs. Packages are not signed releases;
-compare the artifact's recorded hash before installing a downloaded package.
+repository snapshot; `ci/arch.json` declares both. Artifacts contain the source
+recipe bundle, `.PKGINFO`, `.BUILDINFO`, file inventory, hashes (including the
+package files' SHA-256), linkage, compiler/package provenance and lifecycle
+logs. They do not contain the package files or any other executable: the
+package's licence notices are incomplete (see below) and distribution is not
+allowed. The checked package stays in the workflow cache for build reuse.
+Packages are not signed releases; compare a package file with the recorded
+SHA-256 before installing it.
 Build provenance is recorded, not a claim of bit-for-bit reproducible binaries.
 CI may reuse a checked package build only for the same recipe/source files,
 toolchain/image/snapshot pins, builder script, PAM probe and workflow file.
