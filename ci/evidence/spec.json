@@ -1,8 +1,8 @@
 {
   "cases": [
     {
-      "id": "c4-after-config",
-      "revision": "234f57222bbd3591cfd6781446d990fde10342df",
+      "id": "c6-before-config",
+      "revision": "ddc68e903ce5d658ae93ae9b63d28285a8c46bf4",
       "cargo": [
         "--features",
         "nvenc",
@@ -10,46 +10,25 @@
         "hypr-rdp"
       ],
       "tests": {
-        "config::tests::password_file_rejects_group_or_other_access": {
-          "result": "ok"
+        "config::tests::args_debug_redacts_passwords": {
+          "result": "FAILED",
+          "messages": [
+            "Debug must redact configured passwords"
+          ]
         },
-        "config::tests::password_file_enforces_size_limit_before_stripping_newline": {
-          "result": "ok"
+        "config::tests::config_file_debug_redacts_passwords": {
+          "result": "FAILED",
+          "messages": [
+            "Debug must redact configured passwords"
+          ]
         },
-        "config::tests::password_file_accepts_private_read_only_files_and_symlinks": {
-          "result": "ok"
-        },
-        "config::tests::password_file_strips_exactly_one_trailing_line_ending": {
-          "result": "ok"
+        "config::tests::configured_credentials_debug_redacts_passwords": {
+          "result": "FAILED",
+          "messages": [
+            "Debug must redact configured passwords"
+          ]
         }
-      },
-      "suites": [
-        {
-          "filter": "config::",
-          "min_passed": 59
-        }
-      ]
-    },
-    {
-      "id": "c4-after-startup",
-      "revision": "234f57222bbd3591cfd6781446d990fde10342df",
-      "cargo": [
-        "--features",
-        "nvenc",
-        "--test",
-        "startup"
-      ],
-      "tests": {
-        "password_file_rejects_fifo_and_devices_before_tls_or_desktop": {
-          "result": "ok"
-        }
-      },
-      "suites": [
-        {
-          "filter": "",
-          "min_passed": 9
-        }
-      ]
+      }
     }
   ]
 }
