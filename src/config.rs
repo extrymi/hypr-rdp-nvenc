@@ -640,9 +640,9 @@ fn read_password_file(path: &str) -> anyhow::Result<String> {
         .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC)
         .open(path)
         .map_err(|error| anyhow::anyhow!("failed to read password file {path:?}: {error}"))?;
-    let metadata = file.metadata().map_err(|error| {
-        anyhow::anyhow!("failed to inspect password file {path:?}: {error}")
-    })?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| anyhow::anyhow!("failed to inspect password file {path:?}: {error}"))?;
     anyhow::ensure!(
         metadata.is_file(),
         "password file {path:?} must be a regular file"
