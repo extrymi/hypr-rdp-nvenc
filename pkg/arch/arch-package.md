@@ -22,7 +22,7 @@ builder first. A distro Rust installation must provide the same compatible
 compiler; the recipe does not download/install a toolchain or bypass pacman.
 `prepare()` fetches locked Cargo dependencies; build/check use `--frozen`.
 Runtime source is pinned to the CPU-tested runtime commit
-`c321351d578bb5c6ecc38ccf0dc87a5b63e10c04`. Local unit/template/helper/doc sources
+`f725818f6414d0a8846131ceda3b44cc1f2c6a84`. Local unit/template/helper/doc sources
 have SHA-256 checksums. Git is pinned to a full commit (its checksum is SKIP, as
 usual for makepkg VCS sources). No floating runtime branch is built. A later
 runtime change requires updating that explicit pin and retesting the package.
@@ -33,8 +33,9 @@ recipe bundle, `.PKGINFO`, `.BUILDINFO`, file inventory, hashes (including the
 package files' SHA-256), linkage, compiler/package provenance and lifecycle
 logs. They do not contain the package files or any other executable (their
 SHA-256 are listed in WITHHELD-SHA256SUMS): the
-package's licence notices are incomplete (see below) and distribution is not
-allowed. The checked package stays in the workflow cache for build reuse.
+package's licence notices are incomplete (see below) and the owner has not
+authorized binary distribution. The checked package stays in the PR merge-ref
+workflow cache for build reuse; this workflow accepts pull requests only.
 Packages are not signed releases; compare a package file with the recorded
 SHA-256 before installing it.
 Build provenance is recorded, not a claim of bit-for-bit reproducible binaries.
@@ -53,7 +54,7 @@ Deployment on the workstation remains a separate acceptance step. When a test
 machine is available, select one exact inspected package file:
 
 ```sh
-sudo pacman -U ./hypr-rdp-nvenc-0.1.7.nvenc3-1-x86_64.pkg.tar.zst
+sudo pacman -U ./hypr-rdp-nvenc-0.1.7.nvenc4-1-x86_64.pkg.tar.zst
 ```
 
 It conflicts with upstream hypr-rdp/hypr-rdp-git, shares the executable name and
@@ -108,7 +109,12 @@ The example preserves the compositor keyboard layout and local audio playback.
 There are no monitor power, input-disabling or lock/unlock hooks.
 
 Set a dedicated RDP username and a nonempty password file owned by this user,
-mode 0600, using a private editor. Use its absolute path; TOML does not expand
+mode 0600 or 0400, using a private editor. It must be a regular file of at most
+1 MiB including its final line ending. Exactly one trailing LF/CRLF is stripped;
+spaces remain part of the password. The installed README describes generating
+a new private file with `openssl rand -base64 24` without overwriting an existing
+one. Configured authentication has no application password-attempt backoff.
+Use the file's absolute path; TOML does not expand
 `~` or `$HOME`. Avoid putting passwords in command-line arguments or shell history.
 Alternatively select `auth_mode="pam"` and remove username/password_file; the
 packaged PAM service authenticates only access, not a new login session. The
@@ -137,6 +143,12 @@ Replace these documentation addresses. The helper uses the default application
 directory, also accepts `--directory ABSOLUTE_PATH`, and prints the SHA-256
 certificate fingerprint, validity and SANs. The directory must be owned by the
 current user with mode 0700. It refuses saved/partial identities and busy locks.
+The helper issues a certificate for 365 days and does not renew it automatically.
+Before expiry follow [renewal and client trust](startup-validation.md#renewal-and-client-trust):
+create a new private directory, retain the old identity, validate both replacement
+paths and arrange client trust before restarting. An expired certificate makes
+ExecCondition skip the service without retries; inspect the user journal and
+`--check-config`. The service does not reload changed files automatically.
 It never changes a client's trust store. Publication cannot replace an existing
 entry; interruption between key/cert publication leaves an incomplete pair and
 startup refuses it. Preserve or explicitly restore the matching pair.
@@ -198,10 +210,19 @@ config if needed, retain the TLS identity and repeat preflight. For GPU diagnosi
 without changing packages, select h264_backend="software", remove nvenc_device,
 and select rate_control="vbr". Strict native failure otherwise closes the remote
 connection. Neither backend change nor reconnect is intended to close desktop apps.
+Rapid re-preemption from a just-evicted source IP can be refused for up to 30
+seconds from eviction, including clients sharing that IP. Wait and retry instead
+of logging out; this is not a delay applied to every reconnect. Client trust
+should be prepared beforehand; real client/reconnect behavior remains untested.
 
 CI tests revision-1 to revision-2 packaging upgrade and downgrade with the same
 runtime, including modified PAM and stable TLS/user config. This is a package
 transaction test, not proof that arbitrary future runtime versions are compatible.
+The separate CPU upgrade job rebuilds the exact nvenc1 recipe, verifies its
+package-member binary hash, then tests old/new/rollback transactions with retained
+config/password/TLS/PAM. A real packaged ExecStart is also checked for bounded
+failure on absent Hyprland IPC after successful ExecCondition. That negative
+startup test does not prove a working desktop, NVENC or client session.
 
 ## Remove and optional full cleanup
 
