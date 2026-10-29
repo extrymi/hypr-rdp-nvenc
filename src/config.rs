@@ -908,6 +908,50 @@ mod tests {
     use std::fs;
     use StartupWarning::*;
 
+    fn assert_password_debug_is_redacted(value: &impl std::fmt::Debug) {
+        for debug in [format!("{value:?}"), format!("{value:#?}")] {
+            assert!(
+                !debug.contains("CANARY-DEBUG-PASSWORD"),
+                "Debug must redact configured passwords"
+            );
+            assert!(debug.contains("<redacted>"), "missing redaction marker");
+            assert!(debug.contains("visible-user"), "username should remain visible");
+        }
+    }
+
+    #[test]
+    fn args_debug_redacts_passwords() {
+        let args = Args::try_parse_from([
+            "hypr-rdp",
+            "--username",
+            "visible-user",
+            "--password",
+            "CANARY-DEBUG-PASSWORD",
+        ])
+        .unwrap();
+        assert_password_debug_is_redacted(&args);
+    }
+
+    #[test]
+    fn config_file_debug_redacts_passwords() {
+        let config = ConfigFile {
+            username: Some("visible-user".into()),
+            password: Some("CANARY-DEBUG-PASSWORD".into()),
+            ..ConfigFile::default()
+        };
+        assert_password_debug_is_redacted(&config);
+    }
+
+    #[test]
+    fn configured_credentials_debug_redacts_passwords() {
+        let credentials = ConfigCredentials {
+            username: "visible-user".into(),
+            password: "CANARY-DEBUG-PASSWORD".into(),
+        };
+        assert_password_debug_is_redacted(&credentials);
+        assert_password_debug_is_redacted(&AuthConfig::Configured(Some(credentials)));
+    }
+
     #[test]
     fn headless_scale_defaults_and_cli_overrides_config() {
         assert_eq!(resolve_headless_scale(None, None).unwrap(), 1.0);
