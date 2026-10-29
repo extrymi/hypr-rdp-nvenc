@@ -200,3 +200,5 @@ all outputs or the captured output also interrupts the remote display.
 ## License
 
 MIT
+
+<!-- Evidence only (impl/evidence-guard-reject): an unpinned runtime change. The Arch workflow must refuse it. Never merge. -->
