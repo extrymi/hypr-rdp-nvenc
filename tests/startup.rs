@@ -296,3 +296,31 @@ async fn config_diagnostics_reject_typos_without_printing_secret_source_lines() 
         fixture.no_home_writes();
     }
 }
+
+#[tokio::test]
+async fn password_file_rejects_fifo_and_devices_before_tls_or_desktop() {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let fixture = Fixture::new();
+    let fifo = fixture.0.join("password-fifo");
+    let name = CString::new(fifo.as_os_str().as_bytes()).unwrap();
+    // SAFETY: name is NUL-terminated and lives through this call. The FIFO is
+    // confined to the test's directory and has no writer.
+    assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+    // The FIFO is first so unfixed code times out without ever reading the
+    // unbounded /dev/zero stream. Fixture::run kills a timed-out child.
+    for password in [fifo.as_path(), Path::new("/dev/zero"), fixture.0.as_path()] {
+        let output = fixture
+            .run(&[
+                "--check-config",
+                "--username",
+                "user",
+                "--password-file",
+                path(password),
+            ])
+            .await;
+        failure(&output, "must be a regular file");
+        fixture.no_home_writes();
+    }
+}

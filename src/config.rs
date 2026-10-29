@@ -13,6 +13,7 @@ use crate::input::KeyboardLayoutPolicy;
 use ironrdp_cliprdr::pdu::MAX_FILE_COUNT;
 
 pub(crate) const DEFAULT_FILE_TRANSFER_MAX_ENTRIES: usize = 10_000;
+const MAX_PASSWORD_FILE_BYTES: u64 = 1024 * 1024;
 
 /// Which directions of clipboard file transfer a session may serve.
 ///
@@ -68,7 +69,7 @@ fn resolve_file_transfer_mode(
     )
 }
 
-#[derive(Parser, Debug)]
+#[derive(Parser)]
 #[command(name = "hypr-rdp", version, about = "Native RDP server for Hyprland")]
 struct Args {
     /// Address to bind the RDP server
@@ -193,7 +194,46 @@ struct Args {
     check_config: bool,
 }
 
-#[derive(Debug, Deserialize, Default)]
+impl std::fmt::Debug for Args {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Args")
+            .field("bind", &self.bind)
+            .field("cert", &self.cert)
+            .field("key", &self.key)
+            .field("auth_mode", &self.auth_mode)
+            .field("pam_service", &self.pam_service)
+            .field("username", &self.username)
+            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .field("password_file", &self.password_file)
+            .field("resolution", &self.resolution)
+            .field("scale", &self.scale)
+            .field("capture_mode", &self.capture_mode)
+            .field("bitrate", &self.bitrate)
+            .field("quality", &self.quality)
+            .field("rate_control", &self.rate_control)
+            .field("fps", &self.fps)
+            .field("max_frames_in_flight", &self.max_frames_in_flight)
+            .field("egfx_codec", &self.egfx_codec)
+            .field("keyboard_layout_policy", &self.keyboard_layout_policy)
+            .field("audio_mode", &self.audio_mode)
+            .field("h264_backend", &self.h264_backend)
+            .field("nvenc_device", &self.nvenc_device)
+            .field("output", &self.output)
+            .field("on_session_start", &self.on_session_start)
+            .field("on_session_end", &self.on_session_end)
+            .field("file_transfer_mode", &self.file_transfer_mode)
+            .field(
+                "file_transfer_max_chunk_bytes",
+                &self.file_transfer_max_chunk_bytes,
+            )
+            .field("file_transfer_max_entries", &self.file_transfer_max_entries)
+            .field("config", &self.config)
+            .field("check_config", &self.check_config)
+            .finish()
+    }
+}
+
+#[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 struct ConfigFile {
     auth_mode: Option<String>,
@@ -223,6 +263,43 @@ struct ConfigFile {
     file_transfer_mode: Option<String>,
     file_transfer_max_chunk_bytes: Option<u32>,
     file_transfer_max_entries: Option<usize>,
+}
+
+impl std::fmt::Debug for ConfigFile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConfigFile")
+            .field("auth_mode", &self.auth_mode)
+            .field("pam_service", &self.pam_service)
+            .field("bind", &self.bind)
+            .field("cert", &self.cert)
+            .field("key", &self.key)
+            .field("username", &self.username)
+            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .field("password_file", &self.password_file)
+            .field("resolution", &self.resolution)
+            .field("scale", &self.scale)
+            .field("capture_mode", &self.capture_mode)
+            .field("bitrate", &self.bitrate)
+            .field("quality", &self.quality)
+            .field("rate_control", &self.rate_control)
+            .field("fps", &self.fps)
+            .field("max_frames_in_flight", &self.max_frames_in_flight)
+            .field("egfx_codec", &self.egfx_codec)
+            .field("keyboard_layout_policy", &self.keyboard_layout_policy)
+            .field("audio_mode", &self.audio_mode)
+            .field("h264_backend", &self.h264_backend)
+            .field("nvenc_device", &self.nvenc_device)
+            .field("output", &self.output)
+            .field("on_session_start", &self.on_session_start)
+            .field("on_session_end", &self.on_session_end)
+            .field("file_transfer_mode", &self.file_transfer_mode)
+            .field(
+                "file_transfer_max_chunk_bytes",
+                &self.file_transfer_max_chunk_bytes,
+            )
+            .field("file_transfer_max_entries", &self.file_transfer_max_entries)
+            .finish()
+    }
 }
 
 impl ConfigFile {
@@ -382,10 +459,19 @@ fn resolve_authentication(args: &mut Args, config: &mut ConfigFile) -> anyhow::R
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 pub(crate) struct ConfigCredentials {
     pub username: String,
     pub password: String,
+}
+
+impl std::fmt::Debug for ConfigCredentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConfigCredentials")
+            .field("username", &self.username)
+            .field("password", &"<redacted>")
+            .finish()
+    }
 }
 
 impl ConfigCredentials {
@@ -627,10 +713,37 @@ fn resolve_password(
 
 /// Reads a password from `path`, stripping exactly one trailing line ending
 /// (`\n` or `\r\n`). Fails if the file cannot be read, or is empty once that
-/// trailing line ending is removed.
+/// trailing line ending is removed. Only private regular files up to 1 MiB
+/// are accepted; metadata and content are read through the same descriptor.
 fn read_password_file(path: &str) -> anyhow::Result<String> {
-    let mut content = std::fs::read(path)
+    use std::fs::OpenOptions;
+    use std::io::Read;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC)
+        .open(path)
         .map_err(|error| anyhow::anyhow!("failed to read password file {path:?}: {error}"))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| anyhow::anyhow!("failed to inspect password file {path:?}: {error}"))?;
+    anyhow::ensure!(
+        metadata.is_file(),
+        "password file {path:?} must be a regular file"
+    );
+    anyhow::ensure!(
+        metadata.permissions().mode() & 0o077 == 0,
+        "password file {path:?} must not be accessible by group or others (use mode 0600 or 0400)"
+    );
+    let mut content = Vec::new();
+    file.take(MAX_PASSWORD_FILE_BYTES + 1)
+        .read_to_end(&mut content)
+        .map_err(|error| anyhow::anyhow!("failed to read password file {path:?}: {error}"))?;
+    anyhow::ensure!(
+        content.len() as u64 <= MAX_PASSWORD_FILE_BYTES,
+        "password file {path:?} exceeds 1 MiB"
+    );
 
     if content.last() == Some(&b'\n') {
         content.pop();
@@ -879,6 +992,62 @@ mod tests {
     use proptest::prelude::*;
     use std::fs;
     use StartupWarning::*;
+
+    fn assert_password_debug_is_redacted(value: &impl std::fmt::Debug) {
+        for debug in [format!("{value:?}"), format!("{value:#?}")] {
+            assert!(
+                !debug.contains("CANARY-DEBUG-PASSWORD"),
+                "Debug must redact configured passwords"
+            );
+            assert!(debug.contains("<redacted>"), "missing redaction marker");
+            assert!(
+                debug.contains("visible-user"),
+                "username should remain visible"
+            );
+        }
+    }
+
+    #[test]
+    fn args_debug_redacts_passwords() {
+        let args = Args::try_parse_from([
+            "hypr-rdp",
+            "--username",
+            "visible-user",
+            "--password",
+            "CANARY-DEBUG-PASSWORD",
+        ])
+        .unwrap();
+        assert_password_debug_is_redacted(&args);
+    }
+
+    #[test]
+    fn config_file_debug_redacts_passwords() {
+        let config = ConfigFile {
+            username: Some("visible-user".into()),
+            password: Some("CANARY-DEBUG-PASSWORD".into()),
+            ..ConfigFile::default()
+        };
+        assert_password_debug_is_redacted(&config);
+    }
+
+    #[test]
+    fn configured_credentials_debug_redacts_passwords() {
+        let credentials = ConfigCredentials {
+            username: "visible-user".into(),
+            password: "CANARY-DEBUG-PASSWORD".into(),
+        };
+        assert_password_debug_is_redacted(&credentials);
+        assert_password_debug_is_redacted(&AuthConfig::Configured(Some(credentials)));
+    }
+
+    #[test]
+    fn debug_preserves_absent_passwords() {
+        let args = Args::try_parse_from(["hypr-rdp"]).unwrap();
+        for debug in [format!("{args:?}"), format!("{:?}", ConfigFile::default())] {
+            assert!(debug.contains("password: None"));
+            assert!(!debug.contains("<redacted>"));
+        }
+    }
 
     #[test]
     fn headless_scale_defaults_and_cli_overrides_config() {
@@ -1374,8 +1543,12 @@ mod tests {
 
     #[test]
     fn password_file_invalid_utf8_fails_startup() {
+        use std::os::unix::fs::PermissionsExt;
+
         let path = temp_config_path("password-file-invalid-utf8");
         fs::write(&path, [0xff]).expect("write password file");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+            .expect("make password file private");
 
         let error = read_password_file(path.to_str().unwrap())
             .expect_err("an invalid UTF-8 password file must fail startup");
@@ -1428,9 +1601,63 @@ mod tests {
     }
 
     fn write_password_file(name: &str, content: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
         let path = temp_config_path(name);
         fs::write(&path, content).expect("write password file");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+            .expect("make password file private");
         path
+    }
+
+    #[test]
+    fn password_file_rejects_group_or_other_access() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = write_password_file("password-file-permissions", "CANARY-PRIVATE-PASSWORD\n");
+        for mode in [0o644, 0o640, 0o620, 0o610, 0o604, 0o602, 0o601] {
+            fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+            let result = read_password_file(path.to_str().unwrap());
+            assert!(
+                result.is_err(),
+                "password files accessible by group or others must be rejected: {mode:o}"
+            );
+            let diagnostic = format!("{:#}", result.unwrap_err());
+            assert!(diagnostic.contains("group or others"), "{diagnostic}");
+            assert!(!diagnostic.contains("CANARY-PRIVATE-PASSWORD"));
+        }
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn password_file_enforces_size_limit_before_stripping_newline() {
+        let content = "x".repeat(1024 * 1024);
+        let path = write_password_file("password-file-size-limit", &content);
+        assert_eq!(read_password_file(path.to_str().unwrap()).unwrap(), content);
+        fs::write(&path, format!("{content}\n")).unwrap();
+        let result = read_password_file(path.to_str().unwrap());
+        assert!(
+            result.is_err(),
+            "password files larger than 1 MiB must be rejected before stripping the newline"
+        );
+        assert!(format!("{:#}", result.unwrap_err()).contains("exceeds 1 MiB"));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn password_file_accepts_private_read_only_files_and_symlinks() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let path = write_password_file("password-file-private-target", " private password \r\n");
+        let link = temp_config_path("password-file-private-symlink");
+        symlink(&path, &link).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o400)).unwrap();
+        assert_eq!(
+            read_password_file(link.to_str().unwrap()).unwrap(),
+            " private password "
+        );
+        fs::remove_file(link).unwrap();
+        fs::remove_file(path).unwrap();
     }
 
     #[test]
