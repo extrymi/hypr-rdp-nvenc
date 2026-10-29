@@ -483,9 +483,18 @@ mod independent_cabac_stream {
         // libx264 High profile, 64x64, IDR + 2 P; cabac-zwK.264 appends
         // (00 00 03)*K to every slice. Provenance: tests/fixtures/h264-cabac.
         let streams: [(usize, &[u8]); 3] = [
-            (0, include_bytes!("../../tests/fixtures/h264-cabac/cabac.264")),
-            (1, include_bytes!("../../tests/fixtures/h264-cabac/cabac-zw1.264")),
-            (2, include_bytes!("../../tests/fixtures/h264-cabac/cabac-zw2.264")),
+            (
+                0,
+                include_bytes!("../../tests/fixtures/h264-cabac/cabac.264"),
+            ),
+            (
+                1,
+                include_bytes!("../../tests/fixtures/h264-cabac/cabac-zw1.264"),
+            ),
+            (
+                2,
+                include_bytes!("../../tests/fixtures/h264-cabac/cabac-zw2.264"),
+            ),
         ];
         for (k, stream) in streams {
             let mut annexb = super::AnnexB::default();
