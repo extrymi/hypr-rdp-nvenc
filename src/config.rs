@@ -222,7 +222,10 @@ impl std::fmt::Debug for Args {
             .field("on_session_start", &self.on_session_start)
             .field("on_session_end", &self.on_session_end)
             .field("file_transfer_mode", &self.file_transfer_mode)
-            .field("file_transfer_max_chunk_bytes", &self.file_transfer_max_chunk_bytes)
+            .field(
+                "file_transfer_max_chunk_bytes",
+                &self.file_transfer_max_chunk_bytes,
+            )
             .field("file_transfer_max_entries", &self.file_transfer_max_entries)
             .field("config", &self.config)
             .field("check_config", &self.check_config)
@@ -290,7 +293,10 @@ impl std::fmt::Debug for ConfigFile {
             .field("on_session_start", &self.on_session_start)
             .field("on_session_end", &self.on_session_end)
             .field("file_transfer_mode", &self.file_transfer_mode)
-            .field("file_transfer_max_chunk_bytes", &self.file_transfer_max_chunk_bytes)
+            .field(
+                "file_transfer_max_chunk_bytes",
+                &self.file_transfer_max_chunk_bytes,
+            )
             .field("file_transfer_max_entries", &self.file_transfer_max_entries)
             .finish()
     }
