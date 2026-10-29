@@ -1374,8 +1374,12 @@ mod tests {
 
     #[test]
     fn password_file_invalid_utf8_fails_startup() {
+        use std::os::unix::fs::PermissionsExt;
+
         let path = temp_config_path("password-file-invalid-utf8");
         fs::write(&path, [0xff]).expect("write password file");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+            .expect("make password file private");
 
         let error = read_password_file(path.to_str().unwrap())
             .expect_err("an invalid UTF-8 password file must fail startup");
@@ -1428,9 +1432,63 @@ mod tests {
     }
 
     fn write_password_file(name: &str, content: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
         let path = temp_config_path(name);
         fs::write(&path, content).expect("write password file");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+            .expect("make password file private");
         path
+    }
+
+    #[test]
+    fn password_file_rejects_group_or_other_access() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = write_password_file("password-file-permissions", "CANARY-PRIVATE-PASSWORD\n");
+        for mode in [0o644, 0o620, 0o604, 0o601] {
+            fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+            let result = read_password_file(path.to_str().unwrap());
+            assert!(
+                result.is_err(),
+                "password files accessible by group or others must be rejected: {mode:o}"
+            );
+            let diagnostic = format!("{:#}", result.unwrap_err());
+            assert!(diagnostic.contains("group or others"), "{diagnostic}");
+            assert!(!diagnostic.contains("CANARY-PRIVATE-PASSWORD"));
+        }
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn password_file_enforces_size_limit_before_stripping_newline() {
+        let content = "x".repeat(1024 * 1024);
+        let path = write_password_file("password-file-size-limit", &content);
+        assert_eq!(read_password_file(path.to_str().unwrap()).unwrap(), content);
+        fs::write(&path, format!("{content}\n")).unwrap();
+        let result = read_password_file(path.to_str().unwrap());
+        assert!(
+            result.is_err(),
+            "password files larger than 1 MiB must be rejected before stripping the newline"
+        );
+        assert!(format!("{:#}", result.unwrap_err()).contains("exceeds 1 MiB"));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn password_file_accepts_private_read_only_files_and_symlinks() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let path = write_password_file("password-file-private-target", " private password \r\n");
+        let link = temp_config_path("password-file-private-symlink");
+        symlink(&path, &link).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o400)).unwrap();
+        assert_eq!(
+            read_password_file(link.to_str().unwrap()).unwrap(),
+            " private password "
+        );
+        fs::remove_file(link).unwrap();
+        fs::remove_file(path).unwrap();
     }
 
     #[test]
