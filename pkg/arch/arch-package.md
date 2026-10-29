@@ -22,7 +22,7 @@ builder first. A distro Rust installation must provide the same compatible
 compiler; the recipe does not download/install a toolchain or bypass pacman.
 `prepare()` fetches locked Cargo dependencies; build/check use `--frozen`.
 Runtime source is pinned to the CPU-tested runtime commit
-`a7420471d711aea20dc5e311361142d2490da414`. Local unit/template/helper/doc sources
+`c92f95f43fb822cf9bc19642acb4b1256b65a8c7`. Local unit/template/helper/doc sources
 have SHA-256 checksums. Git is pinned to a full commit (its checksum is SKIP, as
 usual for makepkg VCS sources). No floating runtime branch is built. A later
 runtime change requires updating that explicit pin and retesting the package.
