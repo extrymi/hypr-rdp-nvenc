@@ -1,59 +1,47 @@
 {
   "cases": [
     {
-      "id": "fdiag2-01-before-bin",
-      "revision": "54bed59340214e3ef06687ab326df8bcb8bf4d01",
+      "id": "b3-2-before-lib",
+      "revision": "13051a4816a99f31decb4cf3cd3f28999a6255ab",
       "cargo": [
         "--features",
         "nvenc",
-        "--bin",
-        "hypr-rdp"
+        "--lib"
       ],
       "tests": {
-        "capture::frame::tests::unusable_native_output_ends_capture_in_auto_and_strict_mode": {
+        "nvenc::annexb::independent_cabac_stream::every_access_unit_is_accepted_and_keeps_its_zero_word_tail": {
           "result": "FAILED",
           "messages": [
-            "panicked at src/capture/frame.rs",
-            "automatic=true",
-            "under a strict backend"
+            "panicked at src/nvenc/annexb.rs",
+            "k=1 frame=0",
+            "InvalidOutput"
           ]
         }
       }
     },
     {
-      "id": "fdiag2-01-after-bin",
-      "revision": "cf12411b48e77b9d04859d26b6b1e2fa90d1a47f",
+      "id": "b3-2-after-lib",
+      "revision": "56a9c147b59ff81a741427e9710f0a4719f65b42",
       "cargo": [
         "--features",
         "nvenc",
-        "--bin",
-        "hypr-rdp"
+        "--lib"
       ],
       "tests": {
-        "capture::frame::tests::unusable_native_output_ends_capture_in_auto_and_strict_mode": {
+        "nvenc::annexb::independent_cabac_stream::every_access_unit_is_accepted_and_keeps_its_zero_word_tail": {
           "result": "ok"
         },
-        "capture::frame::tests::native_failure_disconnects_strict_mode_and_auto_recovers_with_an_idr": {
+        "nvenc::native::tests::cabac_zero_word_tail_is_kept_for_cabac_slices_and_rejected_for_cavlc": {
           "result": "ok"
         },
-        "capture::frame::tests::dmabuf_activation_timeout_leaves_the_bitmap_warning_to_shm_capture": {
-          "result": "ok"
-        },
-        "capture::frame::tests::forced_native_backend_ends_session_when_the_graphics_pipeline_never_opens": {
-          "result": "ok"
-        },
-        "egfx::nvenc::tests::capture_ipc_cpu_encode_decode_and_idr_recovery_preserve_pixels": {
+        "nvenc::annexb::tests::final_emulation_byte_is_accepted_only_after_a_cabac_slice_zero_word": {
           "result": "ok"
         }
       },
       "suites": [
         {
-          "filter": "capture::",
-          "min_passed": 176
-        },
-        {
-          "filter": "egfx::",
-          "min_passed": 170
+          "filter": "nvenc::",
+          "min_passed": 95
         }
       ]
     }
