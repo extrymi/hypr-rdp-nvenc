@@ -1,8 +1,8 @@
 {
   "cases": [
     {
-      "id": "c4-before-config",
-      "revision": "e33b7f367df018dae5b2d9e19360e02c3fecab39",
+      "id": "c4-after-config",
+      "revision": "234f57222bbd3591cfd6781446d990fde10342df",
       "cargo": [
         "--features",
         "nvenc",
@@ -11,22 +11,28 @@
       ],
       "tests": {
         "config::tests::password_file_rejects_group_or_other_access": {
-          "result": "FAILED",
-          "messages": [
-            "password files accessible by group or others must be rejected"
-          ]
+          "result": "ok"
         },
         "config::tests::password_file_enforces_size_limit_before_stripping_newline": {
-          "result": "FAILED",
-          "messages": [
-            "password files larger than 1 MiB must be rejected before stripping the newline"
-          ]
+          "result": "ok"
+        },
+        "config::tests::password_file_accepts_private_read_only_files_and_symlinks": {
+          "result": "ok"
+        },
+        "config::tests::password_file_strips_exactly_one_trailing_line_ending": {
+          "result": "ok"
         }
-      }
+      },
+      "suites": [
+        {
+          "filter": "config::",
+          "min_passed": 59
+        }
+      ]
     },
     {
-      "id": "c4-before-startup",
-      "revision": "e33b7f367df018dae5b2d9e19360e02c3fecab39",
+      "id": "c4-after-startup",
+      "revision": "234f57222bbd3591cfd6781446d990fde10342df",
       "cargo": [
         "--features",
         "nvenc",
@@ -35,12 +41,15 @@
       ],
       "tests": {
         "password_file_rejects_fifo_and_devices_before_tls_or_desktop": {
-          "result": "FAILED",
-          "messages": [
-            "startup must be bounded without a desktop"
-          ]
+          "result": "ok"
         }
-      }
+      },
+      "suites": [
+        {
+          "filter": "",
+          "min_passed": 9
+        }
+      ]
     }
   ]
 }
