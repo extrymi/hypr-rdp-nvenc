@@ -5,6 +5,7 @@ name: Regression evidence
 on:
   push:
     branches: [impl/r1-evidence]
+    paths-ignore: ['ci/fixtures/**', '.github/workflows/fixtures.yml']
 
 permissions:
   contents: read
