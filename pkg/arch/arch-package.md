@@ -31,7 +31,8 @@ CI builds inside a pinned official Arch container against a dated signed Arch
 repository snapshot; `ci/arch.json` declares both. Artifacts contain the source
 recipe bundle, `.PKGINFO`, `.BUILDINFO`, file inventory, hashes (including the
 package files' SHA-256), linkage, compiler/package provenance and lifecycle
-logs. They do not contain the package files or any other executable: the
+logs. They do not contain the package files or any other executable (their
+SHA-256 are listed in WITHHELD-SHA256SUMS): the
 package's licence notices are incomplete (see below) and distribution is not
 allowed. The checked package stays in the workflow cache for build reuse.
 Packages are not signed releases; compare a package file with the recorded

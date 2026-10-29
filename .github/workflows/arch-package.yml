@@ -145,16 +145,34 @@ jobs:
 
       # The repository is public and the package's licence notices are incomplete
       # (unresolved records), so package files and executables are not published.
-      # The checked package stays in the workflow cache for build reuse.
-      - name: Refuse to publish executables
+      # The checked package stays in the workflow cache for build reuse; the
+      # withheld files' SHA-256 stay in the evidence. Runs even after failures.
+      - name: Withhold package files and executables from the public artifact
         if: always()
         run: |
           python3 - <<'PY'
+          import hashlib
           from pathlib import Path
-          published = [p for p in Path('artifacts').rglob('*') if p.is_file()
-                       and not p.name.endswith('.pkg.tar.zst') and p.name != 'pam-probe']
-          if bad := [str(p) for p in published if p.open('rb').read(4) == b'\x7fELF']:
-              raise SystemExit(f'executables must not be published: {bad}')
+          root = Path('artifacts')
+          withheld, unexpected = [], []
+          for path in sorted(root.rglob('*')):
+              if path.is_symlink():
+                  withheld.append(f'symlink  {path.relative_to(root)} -> {path.readlink()}')
+                  unexpected.append(str(path))
+                  path.unlink()
+                  continue
+              if not path.is_file():
+                  continue
+              head = path.open('rb').read(4)
+              if head in (b'\x7fELF', b'\x28\xb5\x2f\xfd') or path.name.endswith('.pkg.tar.zst'):
+                  withheld.append(f'{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.relative_to(root)}')
+                  if path.parent != root or not (path.name.endswith('.pkg.tar.zst') or path.name == 'pam-probe'):
+                      unexpected.append(str(path))
+                  path.unlink()
+          (root / 'WITHHELD-SHA256SUMS').write_text(''.join(line + '\n' for line in withheld))
+          print('\n'.join(withheld) or 'nothing withheld')
+          if unexpected:
+              raise SystemExit(f'unexpected executables, archives or symlinks were withheld: {unexpected}')
           PY
 
       - name: Upload lifecycle evidence without package files or executables
@@ -164,7 +182,7 @@ jobs:
           name: arch-package-${{ github.sha }}
           path: |
             artifacts/
-            !artifacts/*.pkg.tar.zst
-            !artifacts/pam-probe
+            !artifacts/**/*.pkg.tar.zst
+            !artifacts/**/pam-probe
           if-no-files-found: warn
           retention-days: 14
