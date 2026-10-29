@@ -1,49 +1,46 @@
 {
   "cases": [
     {
-      "id": "b3-2-before-lib",
-      "revision": "13051a4816a99f31decb4cf3cd3f28999a6255ab",
+      "id": "c4-before-config",
+      "revision": "e33b7f367df018dae5b2d9e19360e02c3fecab39",
       "cargo": [
         "--features",
         "nvenc",
-        "--lib"
+        "--bin",
+        "hypr-rdp"
       ],
       "tests": {
-        "nvenc::annexb::independent_cabac_stream::every_access_unit_is_accepted_and_keeps_its_zero_word_tail": {
+        "config::tests::password_file_rejects_group_or_other_access": {
           "result": "FAILED",
           "messages": [
-            "panicked at src/nvenc/annexb.rs",
-            "k=1 frame=0",
-            "InvalidOutput"
+            "password files accessible by group or others must be rejected"
+          ]
+        },
+        "config::tests::password_file_enforces_size_limit_before_stripping_newline": {
+          "result": "FAILED",
+          "messages": [
+            "password files larger than 1 MiB must be rejected before stripping the newline"
           ]
         }
       }
     },
     {
-      "id": "b3-2-after-lib",
-      "revision": "56a9c147b59ff81a741427e9710f0a4719f65b42",
+      "id": "c4-before-startup",
+      "revision": "e33b7f367df018dae5b2d9e19360e02c3fecab39",
       "cargo": [
         "--features",
         "nvenc",
-        "--lib"
+        "--test",
+        "startup"
       ],
       "tests": {
-        "nvenc::annexb::independent_cabac_stream::every_access_unit_is_accepted_and_keeps_its_zero_word_tail": {
-          "result": "ok"
-        },
-        "nvenc::native::tests::cabac_zero_word_tail_is_kept_for_cabac_slices_and_rejected_for_cavlc": {
-          "result": "ok"
-        },
-        "nvenc::annexb::tests::final_emulation_byte_is_accepted_only_after_a_cabac_slice_zero_word": {
-          "result": "ok"
+        "password_file_rejects_fifo_and_devices_before_tls_or_desktop": {
+          "result": "FAILED",
+          "messages": [
+            "startup must be bounded without a desktop"
+          ]
         }
-      },
-      "suites": [
-        {
-          "filter": "nvenc::",
-          "min_passed": 95
-        }
-      ]
+      }
     }
   ]
 }
