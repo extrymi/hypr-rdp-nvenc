@@ -528,11 +528,13 @@ fn release_held_input(
     }
 
     let mut released = release_depressed(tracker, depressed, sink, t);
+    // A pointer backend may flush immediately; publish the released keyboard
+    // modifiers before its button-up requests enter that same connection.
+    sink.modifiers(tracker.modifier_state());
     for button in depressed.buttons.drain(..).rev() {
         sink.release_mouse_button(t, button);
         released += 1;
     }
-    sink.modifiers(tracker.modifier_state());
     sink.flush();
     tracing::info!(released, reason, "Released held input");
 }
@@ -806,11 +808,10 @@ mod tests {
                 &calls[..boundary]
             };
             assert!(
-                before_next_client.iter().any(|call| *call
-                    == SinkCall::Button {
-                        button: MouseButton::Left,
-                        pressed: false,
-                    }),
+                before_next_client.contains(&SinkCall::Button {
+                    button: MouseButton::Left,
+                    pressed: false,
+                }),
                 "mouse-only cleanup left the pointer button held"
             );
         }
