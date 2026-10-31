@@ -233,3 +233,21 @@ all outputs or the captured output also interrupts the remote display.
 ## License
 
 MIT
+
+
+### Unicode input in this fork
+
+Unicode keyboard events select a character representable by the current XKB
+keymap, including its group and level modifiers. They preserve press/release
+lifetimes and keep the raw keyboard replica unchanged. Ordinary scancodes and
+mouse shortcuts use that raw state; releasing Unicode restores the latest raw
+state or the remaining active character projection.
+
+One virtual keyboard has one ambient modifier/group state. Its latest held
+repeating raw or Unicode key owns that projection; independent simultaneous
+repeat under incompatible groups is not promised. Only valid BMP characters
+representable as a single key in the current keymap are supported. Unmapped
+characters, isolated surrogates, NUL, compose sequences and non-BMP pairs do not
+produce guessed input. This does not provide a universal IME or clipboard
+injection fallback. Actual client and compositor behavior remains subject to
+hardware acceptance.
