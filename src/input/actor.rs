@@ -515,6 +515,22 @@ mod tests {
         Keymap(usize),
         Flush,
         Mouse,
+        Button {
+            button: ironrdp_server::MouseButton,
+            pressed: bool,
+        },
+    }
+
+    fn mouse_call(event: MouseEvent) -> SinkCall {
+        match event {
+            MouseEvent::Button {
+                button, pressed, ..
+            }
+            | MouseEvent::ButtonRel {
+                button, pressed, ..
+            } => SinkCall::Button { button, pressed },
+            _ => SinkCall::Mouse,
+        }
     }
 
     #[derive(Default)]
@@ -539,8 +555,8 @@ mod tests {
     }
 
     impl InputBackend for TestSink {
-        fn mouse(&mut self, _time: u32, _event: MouseEvent) {
-            self.calls.push(SinkCall::Mouse);
+        fn mouse(&mut self, _time: u32, event: MouseEvent) {
+            self.calls.push(mouse_call(event));
         }
     }
 
@@ -571,8 +587,150 @@ mod tests {
     }
 
     impl InputBackend for SharedSink {
-        fn mouse(&mut self, _time: u32, _event: MouseEvent) {
-            self.calls.lock().unwrap().push(SinkCall::Mouse);
+        fn mouse(&mut self, _time: u32, event: MouseEvent) {
+            self.calls.lock().unwrap().push(mouse_call(event));
+        }
+    }
+
+    fn pointer_lifecycle_trace(shutdown_only: bool) -> Vec<SinkCall> {
+        use crate::input::rdp::{RdpInputSessionHandle, RdpInputSessionSink};
+        use crate::input::KeyboardLayoutPolicy;
+        use ironrdp_server::MouseButton;
+
+        let keymap = generate_xkb_keymap_from_names(&XkbKeymapNames::default())
+            .expect("default keymap compiles");
+        let (sender, receiver) = mpsc::channel();
+        let sender = Arc::new(sender);
+        let session = RdpInputSessionHandle::new(
+            KeyboardLayoutPolicy::Compositor,
+            Arc::downgrade(&sender),
+        );
+        for (index, button) in [
+            MouseButton::Left,
+            MouseButton::Right,
+            MouseButton::Middle,
+            MouseButton::X1,
+            MouseButton::X2,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let event = if index % 2 == 0 {
+                MouseEvent::Button {
+                    x: 10,
+                    y: 20,
+                    button,
+                    pressed: true,
+                }
+            } else {
+                MouseEvent::ButtonRel {
+                    x: 1,
+                    y: 2,
+                    button,
+                    pressed: true,
+                }
+            };
+            sender.send(InputCommand::Mouse(event)).unwrap();
+        }
+        // A repeated down owns only one release; an explicit up removes ownership.
+        sender
+            .send(InputCommand::Mouse(MouseEvent::ButtonRel {
+                x: 0,
+                y: 0,
+                button: MouseButton::Left,
+                pressed: true,
+            }))
+            .unwrap();
+        sender
+            .send(InputCommand::Mouse(MouseEvent::ButtonRel {
+                x: 0,
+                y: 0,
+                button: MouseButton::Right,
+                pressed: false,
+            }))
+            .unwrap();
+        sender
+            .send(InputCommand::Keyboard(KeyboardEvent::Pressed {
+                code: 0x1c,
+                extended: false,
+            }))
+            .unwrap();
+        if !shutdown_only {
+            session.session_ended();
+            session.session_ended();
+            sender
+                .send(InputCommand::Mouse(MouseEvent::Move { x: 1, y: 1 }))
+                .unwrap();
+        }
+        drop(sender);
+        let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+        run_input_actor(
+            receiver,
+            keymap,
+            "test",
+            Instant::now(),
+            SharedSink {
+                calls: Arc::clone(&calls),
+            },
+        );
+        Arc::try_unwrap(calls).unwrap().into_inner().unwrap()
+    }
+
+    #[test]
+    fn session_end_releases_remote_buttons_before_next_client_event() {
+        use ironrdp_server::MouseButton;
+
+        let calls = pointer_lifecycle_trace(false);
+        let next_client = calls
+            .iter()
+            .position(|call| *call == SinkCall::Mouse)
+            .unwrap();
+        for button in [
+            MouseButton::Left,
+            MouseButton::Right,
+            MouseButton::Middle,
+            MouseButton::X1,
+            MouseButton::X2,
+        ] {
+            let release = SinkCall::Button {
+                button,
+                pressed: false,
+            };
+            assert_eq!(
+                calls[..next_client].iter().filter(|call| **call == release).count(),
+                1,
+                "session end left remote pointer buttons held"
+            );
+            assert_eq!(
+                calls.iter().filter(|call| **call == release).count(),
+                1,
+                "repeated session cleanup released a button twice"
+            );
+        }
+        assert_eq!(key_calls(&calls).iter().filter(|key| **key == (28, false)).count(), 1);
+    }
+
+    #[test]
+    fn actor_shutdown_releases_remote_buttons() {
+        use ironrdp_server::MouseButton;
+
+        let calls = pointer_lifecycle_trace(true);
+        for button in [
+            MouseButton::Left,
+            MouseButton::Right,
+            MouseButton::Middle,
+            MouseButton::X1,
+            MouseButton::X2,
+        ] {
+            let release = SinkCall::Button {
+                button,
+                pressed: false,
+            };
+            assert_eq!(
+                calls.iter().filter(|call| **call == release).count(),
+                1,
+                "actor shutdown left remote pointer buttons held"
+            );
         }
     }
 
@@ -980,7 +1138,7 @@ mod tests {
             .expect("ctrl forwarded");
         let mouse_pos = calls
             .iter()
-            .position(|c| *c == SinkCall::Mouse)
+            .position(|call| matches!(call, SinkCall::Button { pressed: true, .. }))
             .expect("click forwarded");
         assert!(ctrl_pos < mouse_pos);
     }
