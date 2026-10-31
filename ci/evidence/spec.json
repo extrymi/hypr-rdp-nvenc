@@ -1,8 +1,8 @@
 {
   "cases": [
     {
-      "id": "r3-fa02-after",
-      "revision": "1c4cf58a26e7c2b07028d43ee4e2152896a07c3b",
+      "id": "r3-fa02-modifiers-before",
+      "revision": "967c130ebbf438912489caffd8d9b5516e24c1a5",
       "cargo": [
         "--features",
         "nvenc",
@@ -42,14 +42,14 @@
         },
         "input::wayland::tests::owned_button_releases_have_frames_and_never_move_the_pointer": {
           "result": "ok"
+        },
+        "input::actor::tests::pointer_cleanup_publishes_released_modifiers_before_button_up": {
+          "result": "FAILED",
+          "messages": [
+            "button release used stale keyboard modifiers"
+          ]
         }
-      },
-      "suites": [
-        {
-          "filter": "input::",
-          "min_passed": 116
-        }
-      ]
+      }
     }
   ]
 }
