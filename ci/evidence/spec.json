@@ -1,8 +1,8 @@
 {
   "cases": [
     {
-      "id": "r3-fa02-final-after",
-      "revision": "10f4c028a99c7b6362ceb6d08b740f3af1e2888d",
+      "id": "r3-fa03-before",
+      "revision": "1a9f89175bf3c4b2dbfefa75e2ca8a5ff9d81de1",
       "cargo": [
         "--features",
         "nvenc",
@@ -45,18 +45,44 @@
         },
         "input::actor::tests::pointer_cleanup_publishes_released_modifiers_before_button_up": {
           "result": "ok"
-        }
-      },
-      "suites": [
-        {
-          "filter": "input::",
-          "min_passed": 117
         },
-        {
-          "filter": "server::session_hook",
-          "min_passed": 22
+        "input::actor::unicode_tests::unicode_selects_the_requested_group_in_the_emitted_stream": {
+          "result": "FAILED",
+          "messages": [
+            "Unicode output mismatch: wrong group"
+          ]
+        },
+        "input::actor::unicode_tests::unicode_selects_us_text_while_the_raw_group_is_russian": {
+          "result": "FAILED",
+          "messages": [
+            "Unicode output mismatch: wrong group"
+          ]
+        },
+        "input::actor::unicode_tests::unicode_selects_the_keymaps_altgr_level": {
+          "result": "FAILED",
+          "messages": [
+            "Unicode output mismatch: wrong level"
+          ]
+        },
+        "input::actor::unicode_tests::unicode_is_exact_with_caps_lock": {
+          "result": "FAILED",
+          "messages": [
+            "Unicode output mismatch: CapsLock leaked"
+          ]
+        },
+        "input::actor::unicode_tests::unicode_is_exact_with_a_held_shift": {
+          "result": "FAILED",
+          "messages": [
+            "Unicode output mismatch: raw Shift leaked"
+          ]
+        },
+        "input::actor::unicode_tests::unicode_does_not_turn_into_a_control_character": {
+          "result": "FAILED",
+          "messages": [
+            "Unicode output mismatch: Control leaked"
+          ]
         }
-      ]
+      }
     }
   ]
 }
