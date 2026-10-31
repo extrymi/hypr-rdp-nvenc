@@ -1,8 +1,8 @@
 {
   "cases": [
     {
-      "id": "r3-fa03-before",
-      "revision": "1a9f89175bf3c4b2dbfefa75e2ca8a5ff9d81de1",
+      "id": "r3-fa03-after",
+      "revision": "21b6c9c694f9f33dd355d53bd8da1076940df30a",
       "cargo": [
         "--features",
         "nvenc",
@@ -47,42 +47,68 @@
           "result": "ok"
         },
         "input::actor::unicode_tests::unicode_selects_the_requested_group_in_the_emitted_stream": {
-          "result": "FAILED",
-          "messages": [
-            "Unicode output mismatch: wrong group"
-          ]
+          "result": "ok"
         },
         "input::actor::unicode_tests::unicode_selects_us_text_while_the_raw_group_is_russian": {
-          "result": "FAILED",
-          "messages": [
-            "Unicode output mismatch: wrong group"
-          ]
+          "result": "ok"
         },
         "input::actor::unicode_tests::unicode_selects_the_keymaps_altgr_level": {
-          "result": "FAILED",
-          "messages": [
-            "Unicode output mismatch: wrong level"
-          ]
+          "result": "ok"
         },
         "input::actor::unicode_tests::unicode_is_exact_with_caps_lock": {
-          "result": "FAILED",
-          "messages": [
-            "Unicode output mismatch: CapsLock leaked"
-          ]
+          "result": "ok"
         },
         "input::actor::unicode_tests::unicode_is_exact_with_a_held_shift": {
-          "result": "FAILED",
-          "messages": [
-            "Unicode output mismatch: raw Shift leaked"
-          ]
+          "result": "ok"
         },
         "input::actor::unicode_tests::unicode_does_not_turn_into_a_control_character": {
-          "result": "FAILED",
-          "messages": [
-            "Unicode output mismatch: Control leaked"
-          ]
+          "result": "ok"
+        },
+        "input::actor::unicode_tests::unicode_repeats_and_aliases_keep_each_remaining_owner": {
+          "result": "ok"
+        },
+        "input::actor::unicode_tests::unicode_does_not_release_a_shared_raw_key_in_either_order": {
+          "result": "ok"
+        },
+        "input::actor::unicode_tests::unicode_projection_preserves_raw_ctrl_click_and_latest_repeat_owner": {
+          "result": "ok"
+        },
+        "input::actor::unicode_tests::unicode_ignores_own_feedback_and_restores_a_new_raw_group": {
+          "result": "ok"
+        },
+        "input::actor::unicode_tests::unicode_keymap_replacement_clears_old_owners_and_rejection_restores_projection": {
+          "result": "ok"
+        },
+        "input::actor::unicode_tests::unicode_cleanup_deduplicates_aliases_for_sync_and_session_end": {
+          "result": "ok"
+        },
+        "input::actor::unicode_tests::unicode_invalid_units_and_unmatched_ups_have_no_wire_effects": {
+          "result": "ok"
+        },
+        "input::actor::unicode_tests::unicode_projection_survives_a_nonrepeating_raw_lock_key": {
+          "result": "ok"
+        },
+        "input::actor::unicode_tests::unicode_restores_raw_alt_super_right_shift_and_altgr_owners": {
+          "result": "ok"
+        },
+        "input::actor::unicode_tests::unicode_uses_a_keymaps_mod3_selector_instead_of_guessing_shift": {
+          "result": "ok"
+        },
+        "input::actor::unicode_tests::unicode_actor_shutdown_releases_wire_owners_and_projection": {
+          "result": "ok"
         }
-      }
+      },
+      "suites": [
+        {
+          "filter": "input::",
+          "min_passed": 134
+        },
+        {
+          "filter": "server::session_hook",
+          "min_passed": 22
+        }
+      ]
     }
-  ]
+  ],
+  "purpose": "Required future outcomes only. Actual observed outcomes and exit codes are produced by the unchanged CI checker; these tests have not yet passed."
 }
