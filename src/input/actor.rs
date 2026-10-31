@@ -592,7 +592,7 @@ mod tests {
         }
     }
 
-    fn pointer_lifecycle_trace(shutdown_only: bool) -> Vec<SinkCall> {
+    fn pointer_lifecycle_trace(shutdown_only: bool, keyboard_held: bool) -> Vec<SinkCall> {
         use crate::input::rdp::{RdpInputSessionHandle, RdpInputSessionSink};
         use crate::input::KeyboardLayoutPolicy;
         use ironrdp_server::MouseButton;
@@ -649,12 +649,14 @@ mod tests {
                 pressed: false,
             }))
             .unwrap();
-        sender
-            .send(InputCommand::Keyboard(KeyboardEvent::Pressed {
-                code: 0x1c,
-                extended: false,
-            }))
-            .unwrap();
+        if keyboard_held {
+            sender
+                .send(InputCommand::Keyboard(KeyboardEvent::Pressed {
+                    code: 0x1c,
+                    extended: false,
+                }))
+                .unwrap();
+        }
         if !shutdown_only {
             session.session_ended();
             session.session_ended();
@@ -680,7 +682,7 @@ mod tests {
     fn session_end_releases_remote_buttons_before_next_client_event() {
         use ironrdp_server::MouseButton;
 
-        let calls = pointer_lifecycle_trace(false);
+        let calls = pointer_lifecycle_trace(false, true);
         let next_client = calls
             .iter()
             .position(|call| *call == SinkCall::Mouse)
@@ -714,7 +716,7 @@ mod tests {
     fn actor_shutdown_releases_remote_buttons() {
         use ironrdp_server::MouseButton;
 
-        let calls = pointer_lifecycle_trace(true);
+        let calls = pointer_lifecycle_trace(true, true);
         for button in [
             MouseButton::Left,
             MouseButton::Right,
@@ -731,6 +733,19 @@ mod tests {
                 1,
                 "actor shutdown left remote pointer buttons held"
             );
+        }
+    }
+
+    #[test]
+    fn pointer_cleanup_does_not_require_a_held_keyboard_key() {
+        use ironrdp_server::MouseButton;
+
+        for shutdown_only in [false, true] {
+            let calls = pointer_lifecycle_trace(shutdown_only, false);
+            assert!(calls.iter().any(|call| *call == SinkCall::Button {
+                button: MouseButton::Left,
+                pressed: false,
+            }), "mouse-only cleanup left the pointer button held");
         }
     }
 
