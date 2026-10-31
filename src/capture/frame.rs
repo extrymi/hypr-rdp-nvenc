@@ -495,7 +495,9 @@ impl FrameProcessor {
                 shared.full_frame_requested() || shared.generation() != self.egfx_generation
             })
             || self.pending_initial_resize.is_some_and(|_| {
-                self.egfx_shared.as_ref().is_none_or(|shared| shared.is_ready())
+                self.egfx_shared
+                    .as_ref()
+                    .is_none_or(|shared| shared.is_ready())
             })
     }
 
@@ -2892,12 +2894,7 @@ mod tests {
         ));
         assert!(!processor.sent_first_frame);
         if bitmap_first {
-            assert!(replay.poll(
-                &mut processor,
-                &mut pacer,
-                &tx,
-                start + GFX_READY_GRACE,
-            ));
+            assert!(replay.poll(&mut processor, &mut pacer, &tx, start + GFX_READY_GRACE,));
             assert!(bitmaps.try_recv().is_ok());
             assert!(processor.sent_first_frame);
             assert!(!processor.has_pending_damage());
