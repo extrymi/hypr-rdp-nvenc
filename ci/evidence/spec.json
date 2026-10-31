@@ -1,8 +1,8 @@
 {
   "cases": [
     {
-      "id": "r3-fa01-before",
-      "revision": "8a9466bb5318acda336989b6a90273212eeb0b4d",
+      "id": "r3-fa01-after",
+      "revision": "5db41b0e6d4ecd5a9a306e5beaeb8c341c166c4b",
       "cargo": [
         "--features",
         "nvenc",
@@ -11,22 +11,25 @@
       ],
       "tests": {
         "capture::frame::tests::ext_replay_retries_last_frame_after_ack_without_new_capture": {
-          "result": "FAILED",
-          "messages": [
-            "EXT lost the last frame after ACK without new damage"
-          ]
+          "result": "ok"
         },
         "capture::frame::tests::ext_replay_keeps_pacer_frame_until_backpressure_clears": {
-          "result": "FAILED",
-          "messages": [
-            "EXT lost the last frame after ACK without new damage"
-          ]
+          "result": "ok"
         },
         "capture::frame::tests::ext_replay_services_full_refresh_on_a_quiet_source": {
-          "result": "FAILED",
-          "messages": [
-            "EXT ignored a quiet-source full refresh"
-          ]
+          "result": "ok"
+        },
+        "capture::frame::tests::ext_replay_retries_when_graphics_becomes_ready_without_capture": {
+          "result": "ok"
+        },
+        "capture::frame::tests::ext_replay_activates_late_graphics_after_bitmap_grace": {
+          "result": "ok"
+        },
+        "capture::frame::tests::ext_replay_stays_idle_and_clears_snapshot_before_buffer_reuse": {
+          "result": "ok"
+        },
+        "capture::frame::tests::ext_replay_stops_on_initial_resize_or_closed_bitmap_channel": {
+          "result": "ok"
         }
       }
     }
