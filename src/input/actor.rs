@@ -1812,3 +1812,7 @@ mod tests {
         assert_eq!(keys, vec![(42, true), (30, true), (30, false), (42, false)]);
     }
 }
+
+#[cfg(test)]
+#[path = "unicode_tests.rs"]
+mod unicode_tests;
