@@ -64,7 +64,9 @@ impl KeyboardSink for GlyphSink {
     }
 
     fn keymap(&mut self, data: &[u8]) -> bool {
-        if self.reject_keymaps { return false; }
+        if self.reject_keymaps {
+            return false;
+        }
         self.keymap = data.to_vec();
         true
     }
@@ -324,7 +326,6 @@ fn unicode_does_not_turn_into_a_control_character() {
     );
 }
 
-
 #[test]
 fn unicode_repeats_and_aliases_keep_each_remaining_owner() {
     for reverse in [false, true] {
@@ -335,10 +336,20 @@ fn unicode_repeats_and_aliases_keep_each_remaining_owner() {
         let (first, last) = if reverse { ('ф', 'a') } else { ('a', 'ф') };
         d.keyboard(KeyboardEvent::UnicodeReleased(first as u16));
         assert!(d.sink.wire_held.contains(&30));
-        assert_eq!(d.sink.client_state().key_get_utf32(xkb::Keycode::new(38)), u32::from(last));
+        assert_eq!(
+            d.sink.client_state().key_get_utf32(xkb::Keycode::new(38)),
+            u32::from(last)
+        );
         d.keyboard(KeyboardEvent::UnicodeReleased(last as u16));
         assert_eq!(d.sink.glyphs, [u32::from('a'), u32::from('ф')]);
-        assert_eq!(d.sink.keys.iter().filter(|key| **key == (30, false)).count(), 1);
+        assert_eq!(
+            d.sink
+                .keys
+                .iter()
+                .filter(|key| **key == (30, false))
+                .count(),
+            1
+        );
         assert!(d.sink.wire_held.is_empty());
         assert_eq!(d.sink.unknown_releases, 0);
         assert_eq!(d.tracker.modifier_state(), raw_before);
@@ -358,8 +369,14 @@ fn unicode_repeats_and_aliases_keep_each_remaining_owner() {
 fn unicode_does_not_release_a_shared_raw_key_in_either_order() {
     for unicode_first in [false, true] {
         let mut d = Driver::new("us");
-        let raw_down = KeyboardEvent::Pressed { code: 0x1e, extended: false };
-        let raw_up = KeyboardEvent::Released { code: 0x1e, extended: false };
+        let raw_down = KeyboardEvent::Pressed {
+            code: 0x1e,
+            extended: false,
+        };
+        let raw_up = KeyboardEvent::Released {
+            code: 0x1e,
+            extended: false,
+        };
         if unicode_first {
             d.keyboard(KeyboardEvent::UnicodePressed('a' as u16));
             d.keyboard(raw_down);
@@ -374,7 +391,14 @@ fn unicode_does_not_release_a_shared_raw_key_in_either_order() {
             d.keyboard(raw_up);
         }
         assert_eq!(d.sink.glyphs, [u32::from('a'), u32::from('a')]);
-        assert_eq!(d.sink.keys.iter().filter(|key| **key == (30, false)).count(), 1);
+        assert_eq!(
+            d.sink
+                .keys
+                .iter()
+                .filter(|key| **key == (30, false))
+                .count(),
+            1
+        );
         assert!(d.sink.wire_held.is_empty());
         assert_eq!(d.sink.unknown_releases, 0);
     }
@@ -383,19 +407,43 @@ fn unicode_does_not_release_a_shared_raw_key_in_either_order() {
 #[test]
 fn unicode_projection_preserves_raw_ctrl_click_and_latest_repeat_owner() {
     let mut d = Driver::new("us,ru");
-    d.keyboard(KeyboardEvent::Pressed { code: 0x1d, extended: false });
+    d.keyboard(KeyboardEvent::Pressed {
+        code: 0x1d,
+        extended: false,
+    });
     let ctrl = d.tracker.modifier_state();
     d.keyboard(KeyboardEvent::UnicodePressed('ф' as u16));
     d.command(InputCommand::Mouse(MouseEvent::ButtonRel {
-        x: 0, y: 0, button: MouseButton::Left, pressed: true,
+        x: 0,
+        y: 0,
+        button: MouseButton::Left,
+        pressed: true,
     }));
     assert_eq!(d.sink.mouse_modifiers.last(), Some(&ctrl));
-    assert_eq!(d.sink.client_state().key_get_utf32(xkb::Keycode::new(38)), u32::from('ф'));
-    d.keyboard(KeyboardEvent::Released { code: 0x1d, extended: false });
-    d.keyboard(KeyboardEvent::Pressed { code: 0x30, extended: false });
-    assert_eq!(d.sink.client_state().key_get_utf32(xkb::Keycode::new(56)), u32::from('b'));
-    d.keyboard(KeyboardEvent::Released { code: 0x30, extended: false });
-    assert_eq!(d.sink.client_state().key_get_utf32(xkb::Keycode::new(38)), u32::from('ф'));
+    assert_eq!(
+        d.sink.client_state().key_get_utf32(xkb::Keycode::new(38)),
+        u32::from('ф')
+    );
+    d.keyboard(KeyboardEvent::Released {
+        code: 0x1d,
+        extended: false,
+    });
+    d.keyboard(KeyboardEvent::Pressed {
+        code: 0x30,
+        extended: false,
+    });
+    assert_eq!(
+        d.sink.client_state().key_get_utf32(xkb::Keycode::new(56)),
+        u32::from('b')
+    );
+    d.keyboard(KeyboardEvent::Released {
+        code: 0x30,
+        extended: false,
+    });
+    assert_eq!(
+        d.sink.client_state().key_get_utf32(xkb::Keycode::new(38)),
+        u32::from('ф')
+    );
     d.keyboard(KeyboardEvent::UnicodeReleased('ф' as u16));
     d.command(InputCommand::ReleaseHeldInput);
     assert_eq!(d.sink.glyphs, [u32::from('ф'), u32::from('b')]);
@@ -409,19 +457,33 @@ fn unicode_ignores_own_feedback_and_restores_a_new_raw_group() {
     let mut d = Driver::new("us,ru");
     d.keyboard(KeyboardEvent::UnicodePressed('ф' as u16));
     d.command(InputCommand::SetLockedLayout {
-        layout_name: "English (US)".into(), from_own_keyboard: true,
+        layout_name: "English (US)".into(),
+        from_own_keyboard: true,
     });
     assert_eq!(d.tracker.modifier_state().group, 0);
     assert_eq!(d.sink.modifiers.group, 1);
     let packets = d.sink.modifier_packets;
     d.command(InputCommand::SetLockedLayout {
-        layout_name: "Russian".into(), from_own_keyboard: true,
+        layout_name: "Russian".into(),
+        from_own_keyboard: true,
     });
     assert_eq!(d.sink.modifier_packets, packets);
-    d.keyboard(KeyboardEvent::Pressed { code: 0x38, extended: false });
-    d.keyboard(KeyboardEvent::Pressed { code: 0x2a, extended: false });
-    d.keyboard(KeyboardEvent::Released { code: 0x2a, extended: false });
-    d.keyboard(KeyboardEvent::Released { code: 0x38, extended: false });
+    d.keyboard(KeyboardEvent::Pressed {
+        code: 0x38,
+        extended: false,
+    });
+    d.keyboard(KeyboardEvent::Pressed {
+        code: 0x2a,
+        extended: false,
+    });
+    d.keyboard(KeyboardEvent::Released {
+        code: 0x2a,
+        extended: false,
+    });
+    d.keyboard(KeyboardEvent::Released {
+        code: 0x38,
+        extended: false,
+    });
     assert_eq!(d.tracker.modifier_state().group, 1);
     let raw_now = d.tracker.modifier_state();
     d.keyboard(KeyboardEvent::UnicodeReleased('ф' as u16));
@@ -438,18 +500,28 @@ fn unicode_keymap_replacement_clears_old_owners_and_rejection_restores_projectio
         d.keyboard(KeyboardEvent::UnicodePressed(character as u16));
         d.sink.reject_keymaps = reject;
         let german = generate_xkb_keymap_from_names(&XkbKeymapNames {
-            layout: Some("de".into()), ..Default::default()
-        }).unwrap();
-        d.command(InputCommand::ApplyKeymap { keymap_data: german, keymap_source: "test" });
+            layout: Some("de".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        d.command(InputCommand::ApplyKeymap {
+            keymap_data: german,
+            keymap_source: "test",
+        });
         if reject {
             assert!(d.sink.wire_held.contains(&30));
-            assert_eq!(d.sink.client_state().key_get_utf32(xkb::Keycode::new(38)), u32::from(character));
+            assert_eq!(
+                d.sink.client_state().key_get_utf32(xkb::Keycode::new(38)),
+                u32::from(character)
+            );
         } else {
             assert!(d.sink.wire_held.is_empty());
         }
         let count = d.sink.keys.len();
         d.keyboard(KeyboardEvent::UnicodeReleased(character as u16));
-        if !reject { assert_eq!(d.sink.keys.len(), count); }
+        if !reject {
+            assert_eq!(d.sink.keys.len(), count);
+        }
         d.character(character);
         assert_eq!(d.sink.glyphs, [u32::from(character), u32::from(character)]);
         assert!(d.sink.wire_held.is_empty());
@@ -462,7 +534,10 @@ fn unicode_keymap_replacement_clears_old_owners_and_rejection_restores_projectio
 fn unicode_cleanup_deduplicates_aliases_for_sync_and_session_end() {
     for synchronize in [false, true] {
         let mut d = Driver::new("us,ru");
-        d.keyboard(KeyboardEvent::Pressed { code: 0x1d, extended: false });
+        d.keyboard(KeyboardEvent::Pressed {
+            code: 0x1d,
+            extended: false,
+        });
         d.keyboard(KeyboardEvent::UnicodePressed('A' as u16));
         d.keyboard(KeyboardEvent::UnicodePressed('ф' as u16));
         if synchronize {
@@ -470,7 +545,14 @@ fn unicode_cleanup_deduplicates_aliases_for_sync_and_session_end() {
         } else {
             d.command(InputCommand::ReleaseHeldInput);
         }
-        assert_eq!(d.sink.keys.iter().filter(|key| **key == (30, false)).count(), 1);
+        assert_eq!(
+            d.sink
+                .keys
+                .iter()
+                .filter(|key| **key == (30, false))
+                .count(),
+            1
+        );
         assert!(d.sink.wire_held.is_empty());
         assert_eq!(d.sink.unknown_releases, 0);
         assert_eq!(d.sink.modifiers, d.tracker.modifier_state());
@@ -485,8 +567,13 @@ fn unicode_cleanup_deduplicates_aliases_for_sync_and_session_end() {
 fn unicode_invalid_units_and_unmatched_ups_have_no_wire_effects() {
     for overlay in [false, true] {
         let mut d = Driver::new("us,ru");
-        d.keyboard(KeyboardEvent::Pressed { code: 0x1d, extended: false });
-        if overlay { d.keyboard(KeyboardEvent::UnicodePressed('A' as u16)); }
+        d.keyboard(KeyboardEvent::Pressed {
+            code: 0x1d,
+            extended: false,
+        });
+        if overlay {
+            d.keyboard(KeyboardEvent::UnicodePressed('A' as u16));
+        }
         let packets = d.sink.modifier_packets;
         let keys = d.sink.keys.len();
         let glyphs = d.sink.glyphs.clone();
@@ -510,23 +597,34 @@ fn unicode_invalid_units_and_unmatched_ups_have_no_wire_effects() {
 fn unicode_projection_survives_a_nonrepeating_raw_lock_key() {
     let mut d = Driver::new("us,ru");
     d.keyboard(KeyboardEvent::UnicodePressed('ф' as u16));
-    d.keyboard(KeyboardEvent::Pressed { code: 0x3a, extended: false });
-    d.keyboard(KeyboardEvent::Released { code: 0x3a, extended: false });
+    d.keyboard(KeyboardEvent::Pressed {
+        code: 0x3a,
+        extended: false,
+    });
+    d.keyboard(KeyboardEvent::Released {
+        code: 0x3a,
+        extended: false,
+    });
     let raw_now = d.tracker.modifier_state();
     assert_ne!(raw_now.locked, 0);
-    assert_eq!(d.sink.client_state().key_get_utf32(xkb::Keycode::new(38)), u32::from('ф'));
+    assert_eq!(
+        d.sink.client_state().key_get_utf32(xkb::Keycode::new(38)),
+        u32::from('ф')
+    );
     d.keyboard(KeyboardEvent::UnicodeReleased('ф' as u16));
     assert_eq!(d.sink.modifiers, raw_now);
     assert!(d.sink.wire_held.is_empty());
     assert_eq!(d.sink.unknown_releases, 0);
 }
 
-
 #[test]
 fn unicode_restores_raw_alt_super_right_shift_and_altgr_owners() {
-    for (code, extended, evdev) in [(0x38, false, 56), (0x5b, true, 125),
-        (0x36, false, 54), (0x38, true, 100)]
-    {
+    for (code, extended, evdev) in [
+        (0x38, false, 56),
+        (0x5b, true, 125),
+        (0x36, false, 54),
+        (0x38, true, 100),
+    ] {
         let mut d = Driver::new("us");
         d.keyboard(KeyboardEvent::Pressed { code, extended });
         let raw_before = d.tracker.modifier_state();
@@ -566,7 +664,8 @@ fn unicode_uses_a_keymaps_mod3_selector_instead_of_guessing_shift() {
                 symbols[Group1] = [a, EuroSign]
             };
         };
-    };"#.to_vec();
+    };"#
+    .to_vec();
     data.push(0);
     let mut d = Driver::from_keymap(data);
     let raw_before = d.tracker.modifier_state();
@@ -591,7 +690,9 @@ impl KeyboardSink for SharedGlyphSink {
     fn modifiers(&mut self, state: KeyboardModifierState) {
         self.0.lock().unwrap().modifiers(state);
     }
-    fn keymap(&mut self, data: &[u8]) -> bool { self.0.lock().unwrap().keymap(data) }
+    fn keymap(&mut self, data: &[u8]) -> bool {
+        self.0.lock().unwrap().keymap(data)
+    }
     fn flush(&mut self) {}
 }
 
@@ -604,21 +705,43 @@ impl InputBackend for SharedGlyphSink {
 #[test]
 fn unicode_actor_shutdown_releases_wire_owners_and_projection() {
     let keymap = generate_xkb_keymap_from_names(&XkbKeymapNames {
-        layout: Some("us,ru".into()), ..Default::default()
-    }).unwrap();
+        layout: Some("us,ru".into()),
+        ..Default::default()
+    })
+    .unwrap();
     let (sender, receiver) = mpsc::channel();
-    sender.send(InputCommand::Keyboard(KeyboardEvent::Pressed {
-        code: 0x1d, extended: false,
-    })).unwrap();
-    sender.send(InputCommand::Keyboard(KeyboardEvent::UnicodePressed('A' as u16))).unwrap();
-    sender.send(InputCommand::Keyboard(KeyboardEvent::UnicodePressed('ф' as u16))).unwrap();
+    sender
+        .send(InputCommand::Keyboard(KeyboardEvent::Pressed {
+            code: 0x1d,
+            extended: false,
+        }))
+        .unwrap();
+    sender
+        .send(InputCommand::Keyboard(KeyboardEvent::UnicodePressed(
+            'A' as u16,
+        )))
+        .unwrap();
+    sender
+        .send(InputCommand::Keyboard(KeyboardEvent::UnicodePressed(
+            'ф' as u16,
+        )))
+        .unwrap();
     drop(sender);
     let trace = std::sync::Arc::new(std::sync::Mutex::new(GlyphSink::default()));
-    run_input_actor(receiver, keymap, "test", Instant::now(), SharedGlyphSink(std::sync::Arc::clone(&trace)));
+    run_input_actor(
+        receiver,
+        keymap,
+        "test",
+        Instant::now(),
+        SharedGlyphSink(std::sync::Arc::clone(&trace)),
+    );
     let sink = trace.lock().unwrap();
     assert_eq!(sink.glyphs, [u32::from('A'), u32::from('ф')]);
     assert!(sink.wire_held.is_empty());
     assert_eq!(sink.unknown_releases, 0);
     assert_eq!(sink.modifiers, KeyboardModifierState::default());
-    assert!(!sink.keys.contains(&(42, true)), "Unicode invented a raw Shift owner");
+    assert!(
+        !sink.keys.contains(&(42, true)),
+        "Unicode invented a raw Shift owner"
+    );
 }

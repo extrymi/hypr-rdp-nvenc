@@ -161,15 +161,19 @@ impl KeyboardStateTracker {
         occupied: impl Fn(u32) -> bool,
     ) -> Option<UnicodeKeyMapping> {
         let group = self.modifier_state().group;
-        self.unicode_to_keycode.get(&code_point)?.iter().min_by_key(|mapping| {
-            (
-                occupied(mapping.evdev_key),
-                mapping.modifiers.group != group,
-                mapping.modifiers.depressed.count_ones(),
-                mapping.evdev_key,
-                mapping.modifiers.depressed,
-            )
-        }).copied()
+        self.unicode_to_keycode
+            .get(&code_point)?
+            .iter()
+            .min_by_key(|mapping| {
+                (
+                    occupied(mapping.evdev_key),
+                    mapping.modifiers.group != group,
+                    mapping.modifiers.depressed.count_ones(),
+                    mapping.evdev_key,
+                    mapping.modifiers.depressed,
+                )
+            })
+            .copied()
     }
 
     #[cfg(test)]
@@ -178,7 +182,9 @@ impl KeyboardStateTracker {
     }
 
     pub(super) fn key_repeats(&self, evdev_key: u32) -> bool {
-        self.xkb_state.get_keymap().key_repeats(xkb::Keycode::new(evdev_key + XKB_KEYCODE_OFFSET))
+        self.xkb_state
+            .get_keymap()
+            .key_repeats(xkb::Keycode::new(evdev_key + XKB_KEYCODE_OFFSET))
     }
 
     /// Resolve an XKB layout display name (e.g. "Ukrainian") to its group
@@ -324,7 +330,12 @@ fn compile_xkb_keymap(keymap_data: &[u8]) -> Result<xkb::Keymap> {
 
 const MAX_UNICODE_LEVEL_MASKS: usize = 256;
 
-fn unicode_level_masks(keymap: &xkb::Keymap, key: xkb::Keycode, group: u32, level: u32) -> Vec<u32> {
+fn unicode_level_masks(
+    keymap: &xkb::Keymap,
+    key: xkb::Keycode,
+    group: u32,
+    level: u32,
+) -> Vec<u32> {
     let mut capacity = 4;
     loop {
         let mut masks = vec![0; capacity];
@@ -347,9 +358,11 @@ fn build_unicode_to_keycode(keymap: &xkb::Keymap) -> HashMap<u16, Vec<UnicodeKey
     // This is a separate client state, not State::clone() of the raw replica.
     // It is only driven by explicit masks and never by update_key().
     let mut selector = xkb::State::new(keymap);
-    let shortcut_mods = ["Control", "Mod1", "Mod4"].into_iter().fold(0, |mask, name| {
-        mask | 1u32.checked_shl(keymap.mod_get_index(name)).unwrap_or(0)
-    });
+    let shortcut_mods = ["Control", "Mod1", "Mod4"]
+        .into_iter()
+        .fold(0, |mask, name| {
+            mask | 1u32.checked_shl(keymap.mod_get_index(name)).unwrap_or(0)
+        });
 
     for raw in keymap.min_keycode().raw()..=keymap.max_keycode().raw() {
         let Some(evdev_key) = raw.checked_sub(XKB_KEYCODE_OFFSET) else {
@@ -364,7 +377,8 @@ fn build_unicode_to_keycode(keymap: &xkb::Keymap) -> HashMap<u16, Vec<UnicodeKey
                     continue;
                 };
                 let character = xkb::keysym_to_utf32(*symbol);
-                if character == 0 || character > u32::from(u16::MAX)
+                if character == 0
+                    || character > u32::from(u16::MAX)
                     || char::from_u32(character).is_none()
                 {
                     continue;
@@ -398,7 +412,6 @@ fn build_unicode_to_keycode(keymap: &xkb::Keymap) -> HashMap<u16, Vec<UnicodeKey
     }
     map
 }
-
 
 fn build_layout_names(keymap: &xkb::Keymap) -> Vec<String> {
     (0..keymap.num_layouts())

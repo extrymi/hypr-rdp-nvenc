@@ -78,14 +78,20 @@ struct HeldInput {
 
 impl HeldInput {
     fn is_empty(&self) -> bool {
-        self.plain.is_empty() && self.modifiers.is_empty()
-            && self.unicode.is_empty() && self.buttons.is_empty()
+        self.plain.is_empty()
+            && self.modifiers.is_empty()
+            && self.unicode.is_empty()
+            && self.buttons.is_empty()
     }
 
     fn record_mouse(&mut self, event: &MouseEvent) {
         let (button, pressed) = match event {
-            MouseEvent::Button { button, pressed, .. }
-            | MouseEvent::ButtonRel { button, pressed, .. } => (*button, *pressed),
+            MouseEvent::Button {
+                button, pressed, ..
+            }
+            | MouseEvent::ButtonRel {
+                button, pressed, ..
+            } => (*button, *pressed),
             _ => return,
         };
         if pressed {
@@ -102,8 +108,12 @@ impl HeldInput {
     }
 
     fn owns_key(&self, evdev_key: u32) -> bool {
-        self.plain.contains(&evdev_key) || self.modifiers.contains(&evdev_key)
-            || self.unicode.iter().any(|held| held.mapping.evdev_key == evdev_key)
+        self.plain.contains(&evdev_key)
+            || self.modifiers.contains(&evdev_key)
+            || self
+                .unicode
+                .iter()
+                .any(|held| held.mapping.evdev_key == evdev_key)
     }
 
     fn activate_repeat(&mut self, owner: RepeatOwner) {
@@ -119,7 +129,11 @@ impl HeldInput {
     /// repeating key owns it; raw events temporarily use the raw replica.
     fn projected_state(&self, tracker: &KeyboardStateTracker) -> KeyboardModifierState {
         if let Some(RepeatOwner::Unicode(code_point)) = self.repeat_owners.last() {
-            if let Some(held) = self.unicode.iter().find(|held| held.code_point == *code_point) {
+            if let Some(held) = self
+                .unicode
+                .iter()
+                .find(|held| held.code_point == *code_point)
+            {
                 return held.mapping.modifiers;
             }
         }
@@ -127,14 +141,22 @@ impl HeldInput {
     }
 
     fn press(&mut self, evdev_key: u32, modifier: bool) {
-        let keys = if modifier { &mut self.modifiers } else { &mut self.plain };
+        let keys = if modifier {
+            &mut self.modifiers
+        } else {
+            &mut self.plain
+        };
         if !keys.contains(&evdev_key) {
             keys.push(evdev_key);
         }
     }
 
     fn release(&mut self, evdev_key: u32, modifier: bool) {
-        let keys = if modifier { &mut self.modifiers } else { &mut self.plain };
+        let keys = if modifier {
+            &mut self.modifiers
+        } else {
+            &mut self.plain
+        };
         keys.retain(|&key| key != evdev_key);
         self.remove_repeat(RepeatOwner::Raw(evdev_key));
     }
@@ -259,13 +281,23 @@ fn handle_command(
 ) {
     let t = epoch.elapsed().as_millis() as u32;
     match command {
-        InputCommand::Keyboard(event @ (KeyboardEvent::UnicodePressed(_) | KeyboardEvent::UnicodeReleased(_))) => {
+        InputCommand::Keyboard(
+            event @ (KeyboardEvent::UnicodePressed(_) | KeyboardEvent::UnicodeReleased(_)),
+        ) => {
             // Invalid or unmatched Unicode must have no wire side effects.
             handle_rdp_event(tracker, depressed, sink, t, event);
         }
-        InputCommand::SetLockedLayout { layout_name, from_own_keyboard: true } => {
-            handle_own_layout_event(tracker, keymap_data, sink, &layout_name,
-                depressed.projected_state(tracker));
+        InputCommand::SetLockedLayout {
+            layout_name,
+            from_own_keyboard: true,
+        } => {
+            handle_own_layout_event(
+                tracker,
+                keymap_data,
+                sink,
+                &layout_name,
+                depressed.projected_state(tracker),
+            );
         }
         command => {
             let projected = !depressed.unicode.is_empty();
@@ -331,7 +363,13 @@ fn dispatch_command(
             from_own_keyboard,
         } => {
             if from_own_keyboard {
-                handle_own_layout_event(tracker, keymap_data, sink, &layout_name, depressed.projected_state(tracker));
+                handle_own_layout_event(
+                    tracker,
+                    keymap_data,
+                    sink,
+                    &layout_name,
+                    depressed.projected_state(tracker),
+                );
                 return;
             }
             let Some(group) = tracker.layout_index_by_name(&layout_name) else {
@@ -484,12 +522,22 @@ fn handle_rdp_event(
             sink.flush();
         }
         KeyboardEvent::UnicodePressed(code_point) => {
-            let mapping = depressed.unicode.iter()
-                .find(|held| held.code_point == code_point).map(|held| held.mapping)
+            let mapping = depressed
+                .unicode
+                .iter()
+                .find(|held| held.code_point == code_point)
+                .map(|held| held.mapping)
                 .or_else(|| tracker.unicode_key_mapping(code_point, |key| depressed.owns_key(key)));
             if let Some(mapping) = mapping {
-                if !depressed.unicode.iter().any(|held| held.code_point == code_point) {
-                    depressed.unicode.push(HeldUnicode { code_point, mapping });
+                if !depressed
+                    .unicode
+                    .iter()
+                    .any(|held| held.code_point == code_point)
+                {
+                    depressed.unicode.push(HeldUnicode {
+                        code_point,
+                        mapping,
+                    });
                 }
                 depressed.activate_repeat(RepeatOwner::Unicode(code_point));
                 sink.modifiers(mapping.modifiers);
@@ -501,7 +549,11 @@ fn handle_rdp_event(
             }
         }
         KeyboardEvent::UnicodeReleased(code_point) => {
-            let Some(index) = depressed.unicode.iter().position(|held| held.code_point == code_point) else {
+            let Some(index) = depressed
+                .unicode
+                .iter()
+                .position(|held| held.code_point == code_point)
+            else {
                 return;
             };
             let held = depressed.unicode.remove(index);
@@ -1215,10 +1267,7 @@ mod tests {
         );
 
         let key_calls = key_calls(&calls);
-        assert_eq!(
-            key_calls,
-            vec![(30, true), (30, true), (30, false)]
-        );
+        assert_eq!(key_calls, vec![(30, true), (30, true), (30, false)]);
         assert_eq!(tracker.modifier_state().depressed, 0);
     }
 
@@ -1238,12 +1287,7 @@ mod tests {
         let key_calls = key_calls(&calls);
         assert_eq!(
             key_calls,
-            vec![
-                (30, true),
-                (48, true),
-                (30, false),
-                (48, false),
-            ]
+            vec![(30, true), (48, true), (30, false), (48, false),]
         );
         assert_eq!(tracker.modifier_state().depressed, 0);
     }
@@ -1417,10 +1461,7 @@ mod tests {
         );
 
         let key_calls = key_calls(&calls);
-        assert_eq!(
-            key_calls,
-            vec![(30, true), (30, false)]
-        );
+        assert_eq!(key_calls, vec![(30, true), (30, false)]);
         assert_eq!(tracker.modifier_state().depressed, 0);
     }
 
