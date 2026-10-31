@@ -1361,7 +1361,11 @@ mod tests {
             (MouseButton::X2, keymap::BTN_EXTRA),
         ] {
             assert!(emit_button_release(&sink, 7, button));
-            expected.push(RecordedPointerRequest::Button(7, code, ButtonState::Released));
+            expected.push(RecordedPointerRequest::Button(
+                7,
+                code,
+                ButtonState::Released,
+            ));
             expected.push(RecordedPointerRequest::Frame);
         }
         assert_eq!(*sink.0.borrow(), expected);
