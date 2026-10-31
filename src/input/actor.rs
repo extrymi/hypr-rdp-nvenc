@@ -126,7 +126,7 @@ impl HeldInput {
     }
 
     /// A single virtual keyboard has one ambient state. The latest held
-    /// repeating key owns it; raw events temporarily use the raw replica.
+    /// Unicode or repeating raw key owns it; raw events temporarily use the raw replica.
     fn projected_state(&self, tracker: &KeyboardStateTracker) -> KeyboardModifierState {
         if let Some(RepeatOwner::Unicode(code_point)) = self.repeat_owners.last() {
             if let Some(held) = self
@@ -307,7 +307,9 @@ fn handle_command(
             // Inner returns (e.g. a rejected keymap) must still restore the
             // current projection; raw state itself is never overwritten.
             dispatch_command(tracker, keymap_data, depressed, sink, t, command);
-            if projected {
+            // Reset/keymap handlers publish the final raw state themselves
+            // after clearing Unicode owners. Restore only a surviving overlay.
+            if projected && !depressed.unicode.is_empty() {
                 sink.modifiers(depressed.projected_state(tracker));
                 sink.flush();
             }

@@ -244,7 +244,7 @@ mouse shortcuts use that raw state; releasing Unicode restores the latest raw
 state or the remaining active character projection.
 
 One virtual keyboard has one ambient modifier/group state. Its latest held
-repeating raw or Unicode key owns that projection; independent simultaneous
+Unicode key or repeating raw key owns that projection; independent simultaneous
 repeat under incompatible groups is not promised. Only valid BMP characters
 representable as a single key in the current keymap are supported. Unmapped
 characters, isolated surrogates, NUL, compose sequences and non-BMP pairs do not
