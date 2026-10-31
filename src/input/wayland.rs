@@ -102,6 +102,12 @@ impl InputBackend for WaylandInput {
         }
     }
 
+    fn release_mouse_button(&mut self, time: u32, button: MouseButton) {
+        if emit_button_release(&self.vp, time, button) {
+            self.flush();
+        }
+    }
+
     fn pump(&mut self) {
         // Nothing else reads this connection; without an occasional read,
         // compositor events would accumulate unread in the socket buffer.
@@ -161,6 +167,15 @@ impl PointerRequestSink for ZwlrVirtualPointerV1 {
     fn button(&self, time: u32, button: u32, state: ButtonState) {
         self.button(time, button, state);
     }
+}
+
+fn emit_button_release(sink: &impl PointerRequestSink, time: u32, button: MouseButton) -> bool {
+    let Some(code) = evdev_button(button) else {
+        return false;
+    };
+    sink.button(time, code, ButtonState::Released);
+    sink.frame();
+    true
 }
 
 fn emit_mouse_event(
@@ -1332,6 +1347,24 @@ mod tests {
                 .borrow_mut()
                 .push(RecordedPointerRequest::Button(time, button, state));
         }
+    }
+
+    #[test]
+    fn owned_button_releases_have_frames_and_never_move_the_pointer() {
+        let sink = RecordingPointerSink::default();
+        let mut expected = Vec::new();
+        for (button, code) in [
+            (MouseButton::Left, keymap::BTN_LEFT),
+            (MouseButton::Right, keymap::BTN_RIGHT),
+            (MouseButton::Middle, keymap::BTN_MIDDLE),
+            (MouseButton::X1, keymap::BTN_SIDE),
+            (MouseButton::X2, keymap::BTN_EXTRA),
+        ] {
+            assert!(emit_button_release(&sink, 7, button));
+            expected.push(RecordedPointerRequest::Button(7, code, ButtonState::Released));
+            expected.push(RecordedPointerRequest::Frame);
+        }
+        assert_eq!(*sink.0.borrow(), expected);
     }
 
     fn emit_one(sink: &RecordingPointerSink, event: MouseEvent) -> bool {

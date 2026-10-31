@@ -11,7 +11,7 @@
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use ironrdp_server::{KeyboardEvent, MouseEvent};
+use ironrdp_server::{KeyboardEvent, MouseButton, MouseEvent};
 
 use super::keyboard::{KeyboardModifierState, KeyboardStateTracker};
 use super::keymap;
@@ -35,7 +35,7 @@ pub(super) enum InputCommand {
     Mouse(MouseEvent),
     /// The session ended: release anything the client left held. The actor
     /// outlives a single connection, so nothing else would.
-    ReleaseHeldKeys,
+    ReleaseHeldInput,
     /// Replace the active keymap (client keyboard layout policy).
     ApplyKeymap {
         keymap_data: Vec<u8>,
@@ -57,15 +57,38 @@ pub(super) enum InputCommand {
 }
 
 #[derive(Default)]
-struct DepressedKeys {
+struct HeldInput {
     plain: Vec<u32>,
     modifiers: Vec<u32>,
     unicode_shift_owners: Vec<u16>,
+    buttons: Vec<MouseButton>,
 }
 
-impl DepressedKeys {
+impl HeldInput {
     fn is_empty(&self) -> bool {
-        self.plain.is_empty() && self.modifiers.is_empty() && self.unicode_shift_owners.is_empty()
+        self.plain.is_empty()
+            && self.modifiers.is_empty()
+            && self.unicode_shift_owners.is_empty()
+            && self.buttons.is_empty()
+    }
+
+    fn record_mouse(&mut self, event: &MouseEvent) {
+        let (button, pressed) = match event {
+            MouseEvent::Button {
+                button, pressed, ..
+            }
+            | MouseEvent::ButtonRel {
+                button, pressed, ..
+            } => (*button, *pressed),
+            _ => return,
+        };
+        if pressed {
+            if !self.buttons.contains(&button) {
+                self.buttons.push(button);
+            }
+        } else {
+            self.buttons.retain(|held| *held != button);
+        }
     }
 
     fn holds_modifier(&self, evdev_key: u32) -> bool {
@@ -127,6 +150,20 @@ pub(super) trait KeyboardSink: Send {
 /// Full input backend: keyboard requests plus mouse event execution.
 pub(super) trait InputBackend: KeyboardSink {
     fn mouse(&mut self, time: u32, event: MouseEvent);
+    /// Release an owned button without positioning the pointer. The Wayland
+    /// backend emits the button request directly; simple backends may reuse
+    /// their relative-event path with a zero displacement.
+    fn release_mouse_button(&mut self, time: u32, button: MouseButton) {
+        self.mouse(
+            time,
+            MouseEvent::ButtonRel {
+                x: 0,
+                y: 0,
+                button,
+                pressed: false,
+            },
+        );
+    }
     /// Service the underlying transport while idle: read and dispatch
     /// whatever the compositor sent, and flush our side.
     fn pump(&mut self) {}
@@ -152,7 +189,7 @@ pub(super) fn run_input_actor(
     };
 
     let mut keymap_data = initial_keymap;
-    let mut depressed = DepressedKeys::default();
+    let mut depressed = HeldInput::default();
     if !backend.keymap(&keymap_data) {
         // Without a device keymap every further request is a protocol
         // error; stop loudly instead of running dead.
@@ -197,7 +234,7 @@ pub(super) fn run_input_actor(
         }
     }
 
-    release_held_keys(
+    release_held_input(
         &mut tracker,
         &mut depressed,
         &mut backend,
@@ -211,7 +248,7 @@ pub(super) fn run_input_actor(
 fn handle_command(
     tracker: &mut KeyboardStateTracker,
     keymap_data: &mut Vec<u8>,
-    depressed: &mut DepressedKeys,
+    depressed: &mut HeldInput,
     sink: &mut impl InputBackend,
     epoch: &Instant,
     command: InputCommand,
@@ -219,11 +256,14 @@ fn handle_command(
     let t = epoch.elapsed().as_millis() as u32;
 
     match command {
-        InputCommand::ReleaseHeldKeys => {
-            release_held_keys(tracker, depressed, sink, t, "session-end")
+        InputCommand::ReleaseHeldInput => {
+            release_held_input(tracker, depressed, sink, t, "session-end")
         }
         InputCommand::Keyboard(event) => handle_rdp_event(tracker, depressed, sink, t, event),
-        InputCommand::Mouse(event) => sink.mouse(t, event),
+        InputCommand::Mouse(event) => {
+            depressed.record_mouse(&event);
+            sink.mouse(t, event);
+        }
         InputCommand::ApplyKeymap {
             keymap_data: new_keymap,
             keymap_source,
@@ -357,7 +397,7 @@ fn pick_initial_layout<'a>(
 
 fn handle_rdp_event(
     tracker: &mut KeyboardStateTracker,
-    depressed: &mut DepressedKeys,
+    depressed: &mut HeldInput,
     sink: &mut impl KeyboardSink,
     t: u32,
     event: KeyboardEvent,
@@ -455,7 +495,7 @@ fn handle_rdp_event(
 
 fn release_depressed(
     tracker: &mut KeyboardStateTracker,
-    depressed: &mut DepressedKeys,
+    depressed: &mut HeldInput,
     sink: &mut impl KeyboardSink,
     t: u32,
 ) -> usize {
@@ -476,10 +516,10 @@ fn release_depressed(
     released
 }
 
-fn release_held_keys(
+fn release_held_input(
     tracker: &mut KeyboardStateTracker,
-    depressed: &mut DepressedKeys,
-    sink: &mut impl KeyboardSink,
+    depressed: &mut HeldInput,
+    sink: &mut impl InputBackend,
     t: u32,
     reason: &'static str,
 ) {
@@ -487,10 +527,14 @@ fn release_held_keys(
         return;
     }
 
-    let released = release_depressed(tracker, depressed, sink, t);
+    let mut released = release_depressed(tracker, depressed, sink, t);
+    for button in depressed.buttons.drain(..).rev() {
+        sink.release_mouse_button(t, button);
+        released += 1;
+    }
     sink.modifiers(tracker.modifier_state());
     sink.flush();
-    tracing::info!(released, reason, "Released held keys");
+    tracing::info!(released, reason, "Released held input");
 }
 
 fn is_modifier(evdev_key: u32) -> bool {
@@ -510,7 +554,10 @@ mod tests {
 
     #[derive(Debug, PartialEq, Eq)]
     enum SinkCall {
-        Key { evdev_key: u32, pressed: bool },
+        Key {
+            evdev_key: u32,
+            pressed: bool,
+        },
         Modifiers(KeyboardModifierState),
         Keymap(usize),
         Flush,
@@ -601,10 +648,8 @@ mod tests {
             .expect("default keymap compiles");
         let (sender, receiver) = mpsc::channel();
         let sender = Arc::new(sender);
-        let session = RdpInputSessionHandle::new(
-            KeyboardLayoutPolicy::Compositor,
-            Arc::downgrade(&sender),
-        );
+        let session =
+            RdpInputSessionHandle::new(KeyboardLayoutPolicy::Compositor, Arc::downgrade(&sender));
         for (index, button) in [
             MouseButton::Left,
             MouseButton::Right,
@@ -699,7 +744,10 @@ mod tests {
                 pressed: false,
             };
             assert_eq!(
-                calls[..next_client].iter().filter(|call| **call == release).count(),
+                calls[..next_client]
+                    .iter()
+                    .filter(|call| **call == release)
+                    .count(),
                 1,
                 "session end left remote pointer buttons held"
             );
@@ -709,7 +757,13 @@ mod tests {
                 "repeated session cleanup released a button twice"
             );
         }
-        assert_eq!(key_calls(&calls).iter().filter(|key| **key == (28, false)).count(), 1);
+        assert_eq!(
+            key_calls(&calls)
+                .iter()
+                .filter(|key| **key == (28, false))
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -742,10 +796,23 @@ mod tests {
 
         for shutdown_only in [false, true] {
             let calls = pointer_lifecycle_trace(shutdown_only, false);
-            assert!(calls.iter().any(|call| *call == SinkCall::Button {
-                button: MouseButton::Left,
-                pressed: false,
-            }), "mouse-only cleanup left the pointer button held");
+            let before_next_client = if shutdown_only {
+                calls.as_slice()
+            } else {
+                let boundary = calls
+                    .iter()
+                    .position(|call| *call == SinkCall::Mouse)
+                    .unwrap();
+                &calls[..boundary]
+            };
+            assert!(
+                before_next_client.iter().any(|call| *call
+                    == SinkCall::Button {
+                        button: MouseButton::Left,
+                        pressed: false,
+                    }),
+                "mouse-only cleanup left the pointer button held"
+            );
         }
     }
 
@@ -764,7 +831,7 @@ mod tests {
                     extended: false,
                 }),
                 InputCommand::Keyboard(KeyboardEvent::UnicodePressed('A' as u16)),
-                InputCommand::ReleaseHeldKeys,
+                InputCommand::ReleaseHeldInput,
             ],
         );
 
@@ -797,7 +864,7 @@ mod tests {
     #[test]
     fn empty_session_end_is_a_noop() {
         let mut tracker = tracker();
-        assert!(run(&mut tracker, vec![InputCommand::ReleaseHeldKeys]).is_empty());
+        assert!(run(&mut tracker, vec![InputCommand::ReleaseHeldInput]).is_empty());
     }
 
     #[test]
@@ -901,7 +968,7 @@ mod tests {
     fn run(tracker: &mut KeyboardStateTracker, commands: Vec<InputCommand>) -> Vec<SinkCall> {
         let mut sink = TestSink::default();
         let mut keymap_data = TEST_KEYMAP.to_vec();
-        let mut depressed = DepressedKeys::default();
+        let mut depressed = HeldInput::default();
         let epoch = Instant::now();
         for command in commands {
             handle_command(
@@ -1437,7 +1504,7 @@ mod tests {
 
         let mut sink = RejectingKeymapSink::default();
         let mut keymap_data = TEST_KEYMAP.to_vec();
-        let mut depressed = DepressedKeys::default();
+        let mut depressed = HeldInput::default();
         let epoch = Instant::now();
         handle_command(
             &mut tracker,
