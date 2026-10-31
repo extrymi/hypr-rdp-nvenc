@@ -1,4 +1,4 @@
-//! SHM dispatch/pacing shared by the EXT caller and its CPU regression tests.
+//! Paced replay of the last completed EXT capture while the source is quiet.
 use std::time::Instant;
 
 use ironrdp_server::DisplayUpdate;
@@ -8,17 +8,17 @@ use crate::capture::frame::{FramePacer, FrameProcessor};
 use crate::capture::scale::PreparedPresentationFrame;
 
 pub(in crate::capture) struct CaptureReplay<'a> {
-    deferred: Option<PreparedPresentationFrame<'a>>,
+    latest: Option<PreparedPresentationFrame<'a>>,
 }
 
 impl<'a> CaptureReplay<'a> {
     pub(in crate::capture) fn new() -> Self {
-        Self { deferred: None }
+        Self { latest: None }
     }
 
     /// End the borrow before this buffer can be handed to the compositor again.
     pub(in crate::capture) fn clear(&mut self) {
-        self.deferred = None;
+        self.latest = None;
     }
 
     pub(in crate::capture) fn submit(
@@ -29,25 +29,27 @@ impl<'a> CaptureReplay<'a> {
         tx: &mpsc::Sender<DisplayUpdate>,
         now: Instant,
     ) -> bool {
-        self.clear();
-        let pending = processor.has_pending_damage();
-        if !pending && processor.sent_first_frame {
+        if !processor.has_pending_work() {
             processor
                 .stats
                 .record_no_damage_skip(frame.width, frame.height);
-        } else if pacer.should_send(
+        } else if !pacer.should_send(
             now,
             processor.sent_first_frame,
-            pending,
+            true,
             processor.pacing_fps(),
         ) {
-            if !processor.process(frame.data.as_ref(), tx) {
-                return false;
-            }
-        } else {
             processor.stats.record_pacer_skip(frame.width, frame.height);
-            self.deferred = Some(frame);
+            self.latest = Some(frame);
+            return true;
+        } else if !processor.process_at(frame.data.as_ref(), tx, now) {
+            self.clear();
+            return false;
         }
+        // `process_at(true)` also means a temporary refusal, such as a full
+        // ACK window. Keep the pixels after success too: a later full refresh
+        // or GFX activation must not depend on new compositor damage.
+        self.latest = Some(frame);
         true
     }
 
@@ -58,17 +60,18 @@ impl<'a> CaptureReplay<'a> {
         tx: &mpsc::Sender<DisplayUpdate>,
         now: Instant,
     ) -> bool {
-        if let Some(frame) = self.deferred.as_ref() {
-            if pacer.should_send(
-                now,
-                processor.sent_first_frame,
-                processor.has_pending_damage(),
-                processor.pacing_fps(),
-            ) {
-                if !processor.process(frame.data.as_ref(), tx) {
-                    return false;
-                }
-                self.deferred = None;
+        if let Some(frame) = self.latest.as_ref() {
+            if processor.has_pending_work()
+                && pacer.should_send(
+                    now,
+                    processor.sent_first_frame,
+                    true,
+                    processor.pacing_fps(),
+                )
+                && !processor.process_at(frame.data.as_ref(), tx, now)
+            {
+                self.clear();
+                return false;
             }
         }
         true

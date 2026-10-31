@@ -11,7 +11,9 @@ use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_captu
 #[cfg(feature = "vaapi")]
 use super::dmabuf_capture;
 use super::state::{AppState, ExtFrameFailure};
-use super::{create_shm_fd, poll_dispatch, CaptureInfo, CaptureReplay, MmapRegion, POLL_TIMEOUT_MS};
+use super::{
+    create_shm_fd, poll_dispatch, CaptureInfo, CaptureReplay, MmapRegion, POLL_TIMEOUT_MS,
+};
 use crate::capture::frame::{FramePacer, FrameProcessor};
 #[cfg(feature = "vaapi")]
 use crate::capture::scale::dmabuf_zero_copy_allowed;
@@ -288,6 +290,17 @@ pub(super) fn capture_loop_ext(
             if state.should_stop() {
                 break;
             }
+            // A retained scaled frame belongs to its presentation geometry.
+            // Recreate the capture session on a quiet-source resize; its first
+            // capture supplies fresh pixels even without compositor damage.
+            if output_layout
+                .snapshot()
+                .is_some_and(|snapshot| snapshot.geometry_generation != processor_generation)
+            {
+                replay.clear();
+                frame.destroy();
+                return Err(super::wlr::BufferParametersChanged.into());
+            }
             if !replay.poll(&mut proc, &mut frame_pacer, &state.tx, Instant::now()) {
                 tx_closed = true;
                 break;
@@ -387,7 +400,13 @@ pub(super) fn capture_loop_ext(
             false,
         );
 
-        if !replay.submit(prepared, &mut proc, &mut frame_pacer, &state.tx, Instant::now()) {
+        if !replay.submit(
+            prepared,
+            &mut proc,
+            &mut frame_pacer,
+            &state.tx,
+            Instant::now(),
+        ) {
             break;
         }
     }
