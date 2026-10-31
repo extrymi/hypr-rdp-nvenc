@@ -1,8 +1,8 @@
 {
   "cases": [
     {
-      "id": "r3-fa02-before",
-      "revision": "4341831b517dbbe234b51ca9a3861048ece6246a",
+      "id": "r3-fa02-after",
+      "revision": "1c4cf58a26e7c2b07028d43ee4e2152896a07c3b",
       "cargo": [
         "--features",
         "nvenc",
@@ -32,24 +32,24 @@
           "result": "ok"
         },
         "input::actor::tests::session_end_releases_remote_buttons_before_next_client_event": {
-          "result": "FAILED",
-          "messages": [
-            "session end left remote pointer buttons held"
-          ]
+          "result": "ok"
         },
         "input::actor::tests::actor_shutdown_releases_remote_buttons": {
-          "result": "FAILED",
-          "messages": [
-            "actor shutdown left remote pointer buttons held"
-          ]
+          "result": "ok"
         },
         "input::actor::tests::pointer_cleanup_does_not_require_a_held_keyboard_key": {
-          "result": "FAILED",
-          "messages": [
-            "mouse-only cleanup left the pointer button held"
-          ]
+          "result": "ok"
+        },
+        "input::wayland::tests::owned_button_releases_have_frames_and_never_move_the_pointer": {
+          "result": "ok"
         }
-      }
+      },
+      "suites": [
+        {
+          "filter": "input::",
+          "min_passed": 116
+        }
+      ]
     }
   ]
 }
