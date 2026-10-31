@@ -45,8 +45,8 @@ impl RdpInputSessionSink for RdpInputSessionHandle {
         let Some(commands) = self.commands.upgrade() else {
             return;
         };
-        if commands.send(InputCommand::ReleaseHeldKeys).is_err() {
-            tracing::warn!("Input actor is gone; keys held at session end stay held");
+        if commands.send(InputCommand::ReleaseHeldInput).is_err() {
+            tracing::warn!("Input actor is gone; session input cleanup was not delivered");
         }
     }
 
@@ -208,7 +208,7 @@ mod tests {
         let command = receiver
             .recv_timeout(Duration::from_secs(1))
             .expect("the end of a session must reach the input actor");
-        assert!(matches!(command, InputCommand::ReleaseHeldKeys));
+        assert!(matches!(command, InputCommand::ReleaseHeldInput));
     }
 
     #[test]

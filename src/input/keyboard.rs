@@ -103,11 +103,11 @@ pub(super) fn xkb_names_for_rdp_keyboard_layout(keyboard_layout: u32) -> Option<
     })
 }
 
-/// Evdev keycode + required modifier (e.g. Shift) for a Unicode character.
-#[derive(Clone, Copy)]
+/// One validated evdev key and complete virtual-keyboard projection for text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct UnicodeKeyMapping {
     pub(super) evdev_key: u32,
-    pub(super) needs_shift: bool,
+    pub(super) modifiers: KeyboardModifierState,
 }
 
 /// Modifier and layout snapshot in the shape of
@@ -129,7 +129,7 @@ pub(super) struct KeyboardModifierState {
 /// synchronization, external layout switches) go through the server-side
 /// `xkb_state_update_latched_locked` path against that same state.
 pub(super) struct KeyboardStateTracker {
-    unicode_to_keycode: HashMap<u16, UnicodeKeyMapping>,
+    unicode_to_keycode: HashMap<u16, Vec<UnicodeKeyMapping>>,
     layout_names: Vec<String>,
     xkb_state: xkb::State,
     update_latched_locked: Option<UpdateLatchedLockedFn>,
@@ -155,8 +155,36 @@ impl KeyboardStateTracker {
         })
     }
 
+    pub(super) fn unicode_key_mapping(
+        &self,
+        code_point: u16,
+        occupied: impl Fn(u32) -> bool,
+    ) -> Option<UnicodeKeyMapping> {
+        let group = self.modifier_state().group;
+        self.unicode_to_keycode
+            .get(&code_point)?
+            .iter()
+            .min_by_key(|mapping| {
+                (
+                    occupied(mapping.evdev_key),
+                    mapping.modifiers.group != group,
+                    mapping.modifiers.depressed.count_ones(),
+                    mapping.evdev_key,
+                    mapping.modifiers.depressed,
+                )
+            })
+            .copied()
+    }
+
+    #[cfg(test)]
     pub(super) fn unicode_to_evdev(&self, code_point: u16) -> Option<UnicodeKeyMapping> {
-        self.unicode_to_keycode.get(&code_point).copied()
+        self.unicode_key_mapping(code_point, |_| false)
+    }
+
+    pub(super) fn key_repeats(&self, evdev_key: u32) -> bool {
+        self.xkb_state
+            .get_keymap()
+            .key_repeats(xkb::Keycode::new(evdev_key + XKB_KEYCODE_OFFSET))
     }
 
     /// Resolve an XKB layout display name (e.g. "Ukrainian") to its group
@@ -300,31 +328,88 @@ fn compile_xkb_keymap(keymap_data: &[u8]) -> Result<xkb::Keymap> {
     .context("failed to compile XKB keymap from Wayland keymap data")
 }
 
-fn build_unicode_to_keycode(keymap: &xkb::Keymap) -> HashMap<u16, UnicodeKeyMapping> {
-    let mut map = HashMap::new();
+const MAX_UNICODE_LEVEL_MASKS: usize = 256;
 
-    for keycode_raw in keymap.min_keycode().raw()..=keymap.max_keycode().raw() {
-        let keycode = xkb::Keycode::new(keycode_raw);
-        let evdev_key = keycode_raw - XKB_KEYCODE_OFFSET;
-        let num_layouts = keymap.num_layouts_for_key(keycode);
+fn unicode_level_masks(
+    keymap: &xkb::Keymap,
+    key: xkb::Keycode,
+    group: u32,
+    level: u32,
+) -> Vec<u32> {
+    let mut capacity = 4;
+    loop {
+        let mut masks = vec![0; capacity];
+        let written = keymap.key_get_mods_for_level(key, group, level, &mut masks);
+        if written < capacity {
+            masks.truncate(written);
+            return masks;
+        }
+        // The API returns only the stored count, not the total. Never silently
+        // select from a possibly truncated set of inverse transformations.
+        if capacity == MAX_UNICODE_LEVEL_MASKS {
+            return Vec::new();
+        }
+        capacity *= 2;
+    }
+}
 
-        for layout in 0..num_layouts {
-            let num_levels = keymap.num_levels_for_key(keycode, layout);
-            for level in 0..num_levels {
-                let syms = keymap.key_get_syms_by_level(keycode, layout, level);
-                for sym in syms {
-                    let ch = xkb::keysym_to_utf32(*sym);
-                    if ch > 0 && ch <= u32::from(u16::MAX) {
-                        map.entry(ch as u16).or_insert(UnicodeKeyMapping {
-                            evdev_key,
-                            needs_shift: level == 1, // level 1 = Shift
-                        });
+fn build_unicode_to_keycode(keymap: &xkb::Keymap) -> HashMap<u16, Vec<UnicodeKeyMapping>> {
+    let mut map: HashMap<u16, Vec<UnicodeKeyMapping>> = HashMap::new();
+    // This is a separate client state, not State::clone() of the raw replica.
+    // It is only driven by explicit masks and never by update_key().
+    let mut selector = xkb::State::new(keymap);
+    let shortcut_mods = ["Control", "Mod1", "Mod4"]
+        .into_iter()
+        .fold(0, |mask, name| {
+            mask | 1u32.checked_shl(keymap.mod_get_index(name)).unwrap_or(0)
+        });
+
+    for raw in keymap.min_keycode().raw()..=keymap.max_keycode().raw() {
+        let Some(evdev_key) = raw.checked_sub(XKB_KEYCODE_OFFSET) else {
+            continue;
+        };
+        let key = xkb::Keycode::new(raw);
+        // XKB wraps the per-key layout for these query APIs. Include global
+        // groups too, so shared keys (e.g. Space) can keep the current group.
+        for group in 0..keymap.num_layouts() {
+            for level in 0..keymap.num_levels_for_key(key, group) {
+                let [symbol] = keymap.key_get_syms_by_level(key, group, level) else {
+                    continue;
+                };
+                let character = xkb::keysym_to_utf32(*symbol);
+                if character == 0
+                    || character > u32::from(u16::MAX)
+                    || char::from_u32(character).is_none()
+                {
+                    continue;
+                }
+                for mask in unicode_level_masks(keymap, key, group, level) {
+                    selector.update_mask(mask, 0, 0, 0, 0, group);
+                    if selector.key_get_utf32(key) != character {
+                        continue;
+                    }
+                    let effective = selector.serialize_mods(xkb::STATE_MODS_EFFECTIVE);
+                    let consumed = selector.key_get_consumed_mods(key);
+                    if effective & shortcut_mods & !consumed != 0 {
+                        continue;
+                    }
+                    let mapping = UnicodeKeyMapping {
+                        evdev_key,
+                        modifiers: KeyboardModifierState {
+                            depressed: selector.serialize_mods(xkb::STATE_MODS_DEPRESSED),
+                            latched: selector.serialize_mods(xkb::STATE_MODS_LATCHED),
+                            locked: selector.serialize_mods(xkb::STATE_MODS_LOCKED),
+                            group: selector.serialize_layout(xkb::STATE_LAYOUT_EFFECTIVE),
+                        },
+                    };
+                    let candidates = map.entry(character as u16).or_default();
+                    if !candidates.contains(&mapping) {
+                        candidates.push(mapping);
                     }
                 }
             }
         }
     }
-
     map
 }
 

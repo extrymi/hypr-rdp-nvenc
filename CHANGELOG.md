@@ -1,5 +1,13 @@
 # Changelog
 
+## Fork corrections — 2026-10-31
+
+- Retain the latest completed EXT capture for ACK/backpressure retries, quiet full refresh and late GFX activation; restart capture on presentation geometry changes.
+- Release owned virtual-pointer buttons at session end and actor shutdown, after publishing the released keyboard modifiers. No physical input state is reset.
+- Resolve representable BMP Unicode through the current XKB keymap's group and level selectors. Keep raw keyboard state separate, pin held Unicode mappings until release and preserve shared raw/Unicode key ownership. Unsupported code units are ignored without generating a guessed key.
+- Unicode Shift selectors are modifier packets, rather than artificial raw Shift key owners. Legacy packet-count assertions now accompany independent XKB output, ownership and restoration tests.
+
+
 ## NVIDIA fork — unreleased
 
 ### Changed

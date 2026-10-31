@@ -11,9 +11,9 @@
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use ironrdp_server::{KeyboardEvent, MouseEvent};
+use ironrdp_server::{KeyboardEvent, MouseButton, MouseEvent};
 
-use super::keyboard::{KeyboardModifierState, KeyboardStateTracker};
+use super::keyboard::{KeyboardModifierState, KeyboardStateTracker, UnicodeKeyMapping};
 use super::keymap;
 
 /// How long the actor waits for a command before servicing the transport.
@@ -35,7 +35,7 @@ pub(super) enum InputCommand {
     Mouse(MouseEvent),
     /// The session ended: release anything the client left held. The actor
     /// outlives a single connection, so nothing else would.
-    ReleaseHeldKeys,
+    ReleaseHeldInput,
     /// Replace the active keymap (client keyboard layout policy).
     ApplyKeymap {
         keymap_data: Vec<u8>,
@@ -56,33 +56,88 @@ pub(super) enum InputCommand {
     SetInitialLayout { candidates: InitialLayoutCandidates },
 }
 
-#[derive(Default)]
-struct DepressedKeys {
-    plain: Vec<u32>,
-    modifiers: Vec<u32>,
-    unicode_shift_owners: Vec<u16>,
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RepeatOwner {
+    Raw(u32),
+    Unicode(u16),
 }
 
-impl DepressedKeys {
+struct HeldUnicode {
+    code_point: u16,
+    mapping: UnicodeKeyMapping,
+}
+
+#[derive(Default)]
+struct HeldInput {
+    plain: Vec<u32>,
+    modifiers: Vec<u32>,
+    unicode: Vec<HeldUnicode>,
+    repeat_owners: Vec<RepeatOwner>,
+    buttons: Vec<MouseButton>,
+}
+
+impl HeldInput {
     fn is_empty(&self) -> bool {
-        self.plain.is_empty() && self.modifiers.is_empty() && self.unicode_shift_owners.is_empty()
+        self.plain.is_empty()
+            && self.modifiers.is_empty()
+            && self.unicode.is_empty()
+            && self.buttons.is_empty()
+    }
+
+    fn record_mouse(&mut self, event: &MouseEvent) {
+        let (button, pressed) = match event {
+            MouseEvent::Button {
+                button, pressed, ..
+            }
+            | MouseEvent::ButtonRel {
+                button, pressed, ..
+            } => (*button, *pressed),
+            _ => return,
+        };
+        if pressed {
+            if !self.buttons.contains(&button) {
+                self.buttons.push(button);
+            }
+        } else {
+            self.buttons.retain(|held| *held != button);
+        }
     }
 
     fn holds_modifier(&self, evdev_key: u32) -> bool {
         self.modifiers.contains(&evdev_key)
     }
 
-    fn press_unicode_shift(&mut self, code_point: u16) {
-        if !self.unicode_shift_owners.contains(&code_point) {
-            self.unicode_shift_owners.push(code_point);
-        }
+    fn owns_key(&self, evdev_key: u32) -> bool {
+        self.plain.contains(&evdev_key)
+            || self.modifiers.contains(&evdev_key)
+            || self
+                .unicode
+                .iter()
+                .any(|held| held.mapping.evdev_key == evdev_key)
     }
 
-    fn release_unicode_shift(&mut self, code_point: u16) -> bool {
-        let previous_len = self.unicode_shift_owners.len();
-        self.unicode_shift_owners
-            .retain(|&owner| owner != code_point);
-        self.unicode_shift_owners.len() != previous_len
+    fn activate_repeat(&mut self, owner: RepeatOwner) {
+        self.remove_repeat(owner);
+        self.repeat_owners.push(owner);
+    }
+
+    fn remove_repeat(&mut self, owner: RepeatOwner) {
+        self.repeat_owners.retain(|held| *held != owner);
+    }
+
+    /// A single virtual keyboard has one ambient state. The latest held
+    /// Unicode or repeating raw key owns it; raw events temporarily use the raw replica.
+    fn projected_state(&self, tracker: &KeyboardStateTracker) -> KeyboardModifierState {
+        if let Some(RepeatOwner::Unicode(code_point)) = self.repeat_owners.last() {
+            if let Some(held) = self
+                .unicode
+                .iter()
+                .find(|held| held.code_point == *code_point)
+            {
+                return held.mapping.modifiers;
+            }
+        }
+        tracker.modifier_state()
     }
 
     fn press(&mut self, evdev_key: u32, modifier: bool) {
@@ -103,13 +158,7 @@ impl DepressedKeys {
             &mut self.plain
         };
         keys.retain(|&key| key != evdev_key);
-    }
-
-    fn release_all(&mut self) -> impl Iterator<Item = u32> + '_ {
-        self.plain
-            .drain(..)
-            .rev()
-            .chain(self.modifiers.drain(..).rev())
+        self.remove_repeat(RepeatOwner::Raw(evdev_key));
     }
 }
 
@@ -127,6 +176,20 @@ pub(super) trait KeyboardSink: Send {
 /// Full input backend: keyboard requests plus mouse event execution.
 pub(super) trait InputBackend: KeyboardSink {
     fn mouse(&mut self, time: u32, event: MouseEvent);
+    /// Release an owned button without positioning the pointer. The Wayland
+    /// backend emits the button request directly; simple backends may reuse
+    /// their relative-event path with a zero displacement.
+    fn release_mouse_button(&mut self, time: u32, button: MouseButton) {
+        self.mouse(
+            time,
+            MouseEvent::ButtonRel {
+                x: 0,
+                y: 0,
+                button,
+                pressed: false,
+            },
+        );
+    }
     /// Service the underlying transport while idle: read and dispatch
     /// whatever the compositor sent, and flush our side.
     fn pump(&mut self) {}
@@ -152,7 +215,7 @@ pub(super) fn run_input_actor(
     };
 
     let mut keymap_data = initial_keymap;
-    let mut depressed = DepressedKeys::default();
+    let mut depressed = HeldInput::default();
     if !backend.keymap(&keymap_data) {
         // Without a device keymap every further request is a protocol
         // error; stop loudly instead of running dead.
@@ -197,7 +260,7 @@ pub(super) fn run_input_actor(
         }
     }
 
-    release_held_keys(
+    release_held_input(
         &mut tracker,
         &mut depressed,
         &mut backend,
@@ -211,19 +274,66 @@ pub(super) fn run_input_actor(
 fn handle_command(
     tracker: &mut KeyboardStateTracker,
     keymap_data: &mut Vec<u8>,
-    depressed: &mut DepressedKeys,
+    depressed: &mut HeldInput,
     sink: &mut impl InputBackend,
     epoch: &Instant,
     command: InputCommand,
 ) {
     let t = epoch.elapsed().as_millis() as u32;
-
     match command {
-        InputCommand::ReleaseHeldKeys => {
-            release_held_keys(tracker, depressed, sink, t, "session-end")
+        InputCommand::Keyboard(
+            event @ (KeyboardEvent::UnicodePressed(_) | KeyboardEvent::UnicodeReleased(_)),
+        ) => {
+            // Invalid or unmatched Unicode must have no wire side effects.
+            handle_rdp_event(tracker, depressed, sink, t, event);
+        }
+        InputCommand::SetLockedLayout {
+            layout_name,
+            from_own_keyboard: true,
+        } => {
+            handle_own_layout_event(
+                tracker,
+                keymap_data,
+                sink,
+                &layout_name,
+                depressed.projected_state(tracker),
+            );
+        }
+        command => {
+            let projected = !depressed.unicode.is_empty();
+            if projected {
+                sink.modifiers(tracker.modifier_state());
+            }
+            // Inner returns (e.g. a rejected keymap) must still restore the
+            // current projection; raw state itself is never overwritten.
+            dispatch_command(tracker, keymap_data, depressed, sink, t, command);
+            // Reset/keymap handlers publish the final raw state themselves
+            // after clearing Unicode owners. Restore only a surviving overlay.
+            if projected && !depressed.unicode.is_empty() {
+                sink.modifiers(depressed.projected_state(tracker));
+                sink.flush();
+            }
+        }
+    }
+}
+
+fn dispatch_command(
+    tracker: &mut KeyboardStateTracker,
+    keymap_data: &mut Vec<u8>,
+    depressed: &mut HeldInput,
+    sink: &mut impl InputBackend,
+    t: u32,
+    command: InputCommand,
+) {
+    match command {
+        InputCommand::ReleaseHeldInput => {
+            release_held_input(tracker, depressed, sink, t, "session-end")
         }
         InputCommand::Keyboard(event) => handle_rdp_event(tracker, depressed, sink, t, event),
-        InputCommand::Mouse(event) => sink.mouse(t, event),
+        InputCommand::Mouse(event) => {
+            depressed.record_mouse(&event);
+            sink.mouse(t, event);
+        }
         InputCommand::ApplyKeymap {
             keymap_data: new_keymap,
             keymap_source,
@@ -255,7 +365,13 @@ fn handle_command(
             from_own_keyboard,
         } => {
             if from_own_keyboard {
-                handle_own_layout_event(tracker, keymap_data, sink, &layout_name);
+                handle_own_layout_event(
+                    tracker,
+                    keymap_data,
+                    sink,
+                    &layout_name,
+                    depressed.projected_state(tracker),
+                );
                 return;
             }
             let Some(group) = tracker.layout_index_by_name(&layout_name) else {
@@ -299,12 +415,13 @@ fn handle_own_layout_event(
     keymap_data: &[u8],
     sink: &mut impl KeyboardSink,
     layout_name: &str,
+    projection: KeyboardModifierState,
 ) {
-    let replica_group = tracker.modifier_state().group;
+    let replica_group = projection.group;
     match tracker.layout_index_by_name(layout_name) {
         Some(group) if group == replica_group => {}
         Some(group) => {
-            sink.modifiers(tracker.modifier_state());
+            sink.modifiers(projection);
             sink.flush();
             tracing::debug!(
                 group,
@@ -314,7 +431,7 @@ fn handle_own_layout_event(
         }
         None => {
             if sink.keymap(keymap_data) {
-                sink.modifiers(tracker.modifier_state());
+                sink.modifiers(projection);
             }
             sink.flush();
             tracing::warn!(
@@ -357,7 +474,7 @@ fn pick_initial_layout<'a>(
 
 fn handle_rdp_event(
     tracker: &mut KeyboardStateTracker,
-    depressed: &mut DepressedKeys,
+    depressed: &mut HeldInput,
     sink: &mut impl KeyboardSink,
     t: u32,
     event: KeyboardEvent,
@@ -370,15 +487,13 @@ fn handle_rdp_event(
                     tracing::trace!(evdev_key, "Suppressed duplicate modifier press");
                     return;
                 }
-                let already_active =
-                    evdev_key == LEFT_SHIFT_KEY && !depressed.unicode_shift_owners.is_empty();
                 depressed.press(evdev_key, modifier);
-                if already_active {
-                    return;
-                }
                 sink.key(t, evdev_key, true);
                 if tracker.key(evdev_key, true) {
                     sink.modifiers(tracker.modifier_state());
+                }
+                if !modifier && tracker.key_repeats(evdev_key) {
+                    depressed.activate_repeat(RepeatOwner::Raw(evdev_key));
                 }
                 sink.flush();
             } else {
@@ -393,10 +508,9 @@ fn handle_rdp_event(
                     return;
                 }
                 depressed.release(evdev_key, modifier);
-                if evdev_key == LEFT_SHIFT_KEY && !depressed.unicode_shift_owners.is_empty() {
-                    return;
+                if !depressed.owns_key(evdev_key) {
+                    sink.key(t, evdev_key, false);
                 }
-                sink.key(t, evdev_key, false);
                 if tracker.key(evdev_key, false) {
                     sink.modifiers(tracker.modifier_state());
                 }
@@ -404,82 +518,95 @@ fn handle_rdp_event(
             }
         }
         KeyboardEvent::Synchronize(flags) => {
-            // Announce unconditionally: clients send Synchronize on focus,
-            // which makes it a periodic repair point for out-of-band device
-            // resets that never fire an activelayout event. Release any
-            // tracked key first, then apply locks to the client view.
             release_depressed(tracker, depressed, sink, t);
             tracker.synchronize_locks(flags);
             sink.modifiers(tracker.modifier_state());
             sink.flush();
         }
         KeyboardEvent::UnicodePressed(code_point) => {
-            if let Some(mapping) = tracker.unicode_to_evdev(code_point) {
-                if mapping.needs_shift {
-                    let shift_already_active = depressed.holds_modifier(LEFT_SHIFT_KEY)
-                        || !depressed.unicode_shift_owners.is_empty();
-                    depressed.press_unicode_shift(code_point);
-                    if !shift_already_active {
-                        sink.key(t, LEFT_SHIFT_KEY, true);
-                        if tracker.key(LEFT_SHIFT_KEY, true) {
-                            sink.modifiers(tracker.modifier_state());
-                        }
-                    }
+            let mapping = depressed
+                .unicode
+                .iter()
+                .find(|held| held.code_point == code_point)
+                .map(|held| held.mapping)
+                .or_else(|| tracker.unicode_key_mapping(code_point, |key| depressed.owns_key(key)));
+            if let Some(mapping) = mapping {
+                if !depressed
+                    .unicode
+                    .iter()
+                    .any(|held| held.code_point == code_point)
+                {
+                    depressed.unicode.push(HeldUnicode {
+                        code_point,
+                        mapping,
+                    });
                 }
+                depressed.activate_repeat(RepeatOwner::Unicode(code_point));
+                sink.modifiers(mapping.modifiers);
                 sink.key(t, mapping.evdev_key, true);
-                depressed.press(mapping.evdev_key, false);
                 sink.flush();
             } else {
-                tracing::trace!(code_point, "No evdev mapping for Unicode character");
+                // Input may contain passwords: do not log the code point.
+                tracing::trace!("Unicode input is not representable by the current keymap");
             }
         }
         KeyboardEvent::UnicodeReleased(code_point) => {
-            if let Some(mapping) = tracker.unicode_to_evdev(code_point) {
-                sink.key(t, mapping.evdev_key, false);
-                depressed.release(mapping.evdev_key, false);
-                if mapping.needs_shift
-                    && depressed.release_unicode_shift(code_point)
-                    && depressed.unicode_shift_owners.is_empty()
-                    && !depressed.holds_modifier(LEFT_SHIFT_KEY)
-                {
-                    sink.key(t, LEFT_SHIFT_KEY, false);
-                    if tracker.key(LEFT_SHIFT_KEY, false) {
-                        sink.modifiers(tracker.modifier_state());
-                    }
-                }
-                sink.flush();
+            let Some(index) = depressed
+                .unicode
+                .iter()
+                .position(|held| held.code_point == code_point)
+            else {
+                return;
+            };
+            let held = depressed.unicode.remove(index);
+            depressed.remove_repeat(RepeatOwner::Unicode(code_point));
+            if !depressed.owns_key(held.mapping.evdev_key) {
+                sink.modifiers(held.mapping.modifiers);
+                sink.key(t, held.mapping.evdev_key, false);
             }
+            sink.modifiers(depressed.projected_state(tracker));
+            sink.flush();
         }
     }
 }
 
 fn release_depressed(
     tracker: &mut KeyboardStateTracker,
-    depressed: &mut DepressedKeys,
+    depressed: &mut HeldInput,
     sink: &mut impl KeyboardSink,
     t: u32,
 ) -> usize {
-    let unicode_shift_only =
-        !depressed.unicode_shift_owners.is_empty() && !depressed.holds_modifier(LEFT_SHIFT_KEY);
-    let mut released = 0;
-    for evdev_key in depressed.release_all() {
-        sink.key(t, evdev_key, false);
+    let mut released = Vec::new();
+    // Release Unicode character identities first, then raw characters and
+    // modifiers. A shared evdev key gets one up; only raw owners update XKB.
+    for held in depressed.unicode.drain(..).rev() {
+        if !released.contains(&held.mapping.evdev_key) {
+            sink.key(t, held.mapping.evdev_key, false);
+            released.push(held.mapping.evdev_key);
+        }
+    }
+    for evdev_key in depressed.plain.drain(..).rev() {
+        if !released.contains(&evdev_key) {
+            sink.key(t, evdev_key, false);
+            released.push(evdev_key);
+        }
         tracker.key(evdev_key, false);
-        released += 1;
     }
-    if unicode_shift_only {
-        sink.key(t, LEFT_SHIFT_KEY, false);
-        tracker.key(LEFT_SHIFT_KEY, false);
-        released += 1;
+    for evdev_key in depressed.modifiers.drain(..).rev() {
+        if !released.contains(&evdev_key) {
+            sink.key(t, evdev_key, false);
+            released.push(evdev_key);
+        }
+        tracker.key(evdev_key, false);
     }
-    depressed.unicode_shift_owners.clear();
-    released
+    depressed.repeat_owners.clear();
+    released.len()
 }
 
-fn release_held_keys(
+fn release_held_input(
     tracker: &mut KeyboardStateTracker,
-    depressed: &mut DepressedKeys,
-    sink: &mut impl KeyboardSink,
+    depressed: &mut HeldInput,
+    sink: &mut impl InputBackend,
     t: u32,
     reason: &'static str,
 ) {
@@ -487,10 +614,16 @@ fn release_held_keys(
         return;
     }
 
-    let released = release_depressed(tracker, depressed, sink, t);
+    let mut released = release_depressed(tracker, depressed, sink, t);
+    // A pointer backend may flush immediately; publish the released keyboard
+    // modifiers before its button-up requests enter that same connection.
     sink.modifiers(tracker.modifier_state());
+    for button in depressed.buttons.drain(..).rev() {
+        sink.release_mouse_button(t, button);
+        released += 1;
+    }
     sink.flush();
-    tracing::info!(released, reason, "Released held keys");
+    tracing::info!(released, reason, "Released held input");
 }
 
 fn is_modifier(evdev_key: u32) -> bool {
@@ -510,11 +643,30 @@ mod tests {
 
     #[derive(Debug, PartialEq, Eq)]
     enum SinkCall {
-        Key { evdev_key: u32, pressed: bool },
+        Key {
+            evdev_key: u32,
+            pressed: bool,
+        },
         Modifiers(KeyboardModifierState),
         Keymap(usize),
         Flush,
         Mouse,
+        Button {
+            button: ironrdp_server::MouseButton,
+            pressed: bool,
+        },
+    }
+
+    fn mouse_call(event: MouseEvent) -> SinkCall {
+        match event {
+            MouseEvent::Button {
+                button, pressed, ..
+            }
+            | MouseEvent::ButtonRel {
+                button, pressed, ..
+            } => SinkCall::Button { button, pressed },
+            _ => SinkCall::Mouse,
+        }
     }
 
     #[derive(Default)]
@@ -539,8 +691,8 @@ mod tests {
     }
 
     impl InputBackend for TestSink {
-        fn mouse(&mut self, _time: u32, _event: MouseEvent) {
-            self.calls.push(SinkCall::Mouse);
+        fn mouse(&mut self, _time: u32, event: MouseEvent) {
+            self.calls.push(mouse_call(event));
         }
     }
 
@@ -571,9 +723,219 @@ mod tests {
     }
 
     impl InputBackend for SharedSink {
-        fn mouse(&mut self, _time: u32, _event: MouseEvent) {
-            self.calls.lock().unwrap().push(SinkCall::Mouse);
+        fn mouse(&mut self, _time: u32, event: MouseEvent) {
+            self.calls.lock().unwrap().push(mouse_call(event));
         }
+    }
+
+    fn pointer_lifecycle_trace(shutdown_only: bool, keyboard_held: bool) -> Vec<SinkCall> {
+        use crate::input::rdp::{RdpInputSessionHandle, RdpInputSessionSink};
+        use crate::input::KeyboardLayoutPolicy;
+        use ironrdp_server::MouseButton;
+
+        let keymap = generate_xkb_keymap_from_names(&XkbKeymapNames::default())
+            .expect("default keymap compiles");
+        let (sender, receiver) = mpsc::channel();
+        let sender = Arc::new(sender);
+        let session =
+            RdpInputSessionHandle::new(KeyboardLayoutPolicy::Compositor, Arc::downgrade(&sender));
+        for (index, button) in [
+            MouseButton::Left,
+            MouseButton::Right,
+            MouseButton::Middle,
+            MouseButton::X1,
+            MouseButton::X2,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let event = if index % 2 == 0 {
+                MouseEvent::Button {
+                    x: 10,
+                    y: 20,
+                    button,
+                    pressed: true,
+                }
+            } else {
+                MouseEvent::ButtonRel {
+                    x: 1,
+                    y: 2,
+                    button,
+                    pressed: true,
+                }
+            };
+            sender.send(InputCommand::Mouse(event)).unwrap();
+        }
+        // A repeated down owns only one release; an explicit up removes ownership.
+        sender
+            .send(InputCommand::Mouse(MouseEvent::ButtonRel {
+                x: 0,
+                y: 0,
+                button: MouseButton::Left,
+                pressed: true,
+            }))
+            .unwrap();
+        sender
+            .send(InputCommand::Mouse(MouseEvent::ButtonRel {
+                x: 0,
+                y: 0,
+                button: MouseButton::Right,
+                pressed: false,
+            }))
+            .unwrap();
+        if keyboard_held {
+            sender
+                .send(InputCommand::Keyboard(KeyboardEvent::Pressed {
+                    code: 0x1c,
+                    extended: false,
+                }))
+                .unwrap();
+        }
+        if !shutdown_only {
+            session.session_ended();
+            session.session_ended();
+            sender
+                .send(InputCommand::Mouse(MouseEvent::Move { x: 1, y: 1 }))
+                .unwrap();
+        }
+        drop(sender);
+        let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+        run_input_actor(
+            receiver,
+            keymap,
+            "test",
+            Instant::now(),
+            SharedSink {
+                calls: Arc::clone(&calls),
+            },
+        );
+        Arc::try_unwrap(calls).unwrap().into_inner().unwrap()
+    }
+
+    #[test]
+    fn session_end_releases_remote_buttons_before_next_client_event() {
+        use ironrdp_server::MouseButton;
+
+        let calls = pointer_lifecycle_trace(false, true);
+        let next_client = calls
+            .iter()
+            .position(|call| *call == SinkCall::Mouse)
+            .unwrap();
+        for button in [
+            MouseButton::Left,
+            MouseButton::Right,
+            MouseButton::Middle,
+            MouseButton::X1,
+            MouseButton::X2,
+        ] {
+            let release = SinkCall::Button {
+                button,
+                pressed: false,
+            };
+            assert_eq!(
+                calls[..next_client]
+                    .iter()
+                    .filter(|call| **call == release)
+                    .count(),
+                1,
+                "session end left remote pointer buttons held"
+            );
+            assert_eq!(
+                calls.iter().filter(|call| **call == release).count(),
+                1,
+                "repeated session cleanup released a button twice"
+            );
+        }
+        assert_eq!(
+            key_calls(&calls)
+                .iter()
+                .filter(|key| **key == (28, false))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn actor_shutdown_releases_remote_buttons() {
+        use ironrdp_server::MouseButton;
+
+        let calls = pointer_lifecycle_trace(true, true);
+        for button in [
+            MouseButton::Left,
+            MouseButton::Right,
+            MouseButton::Middle,
+            MouseButton::X1,
+            MouseButton::X2,
+        ] {
+            let release = SinkCall::Button {
+                button,
+                pressed: false,
+            };
+            assert_eq!(
+                calls.iter().filter(|call| **call == release).count(),
+                1,
+                "actor shutdown left remote pointer buttons held"
+            );
+        }
+    }
+
+    #[test]
+    fn pointer_cleanup_does_not_require_a_held_keyboard_key() {
+        use ironrdp_server::MouseButton;
+
+        for shutdown_only in [false, true] {
+            let calls = pointer_lifecycle_trace(shutdown_only, false);
+            let before_next_client = if shutdown_only {
+                calls.as_slice()
+            } else {
+                let boundary = calls
+                    .iter()
+                    .position(|call| *call == SinkCall::Mouse)
+                    .unwrap();
+                &calls[..boundary]
+            };
+            assert!(
+                before_next_client.contains(&SinkCall::Button {
+                    button: MouseButton::Left,
+                    pressed: false,
+                }),
+                "mouse-only cleanup left the pointer button held"
+            );
+        }
+    }
+
+    #[test]
+    fn pointer_cleanup_publishes_released_modifiers_before_button_up() {
+        let mut tracker = tracker();
+        let calls = run(
+            &mut tracker,
+            vec![
+                InputCommand::Keyboard(KeyboardEvent::Pressed {
+                    code: 0x1d,
+                    extended: false,
+                }),
+                InputCommand::Mouse(MouseEvent::ButtonRel {
+                    x: 0,
+                    y: 0,
+                    button: MouseButton::Left,
+                    pressed: true,
+                }),
+                InputCommand::ReleaseHeldInput,
+            ],
+        );
+        let button_up = calls
+            .iter()
+            .position(|call| matches!(call, SinkCall::Button { pressed: false, .. }))
+            .expect("owned button released");
+        let before_up = calls[..button_up].iter().rev().find_map(|call| match call {
+            SinkCall::Modifiers(state) => Some(*state),
+            _ => None,
+        });
+        assert_eq!(
+            before_up,
+            Some(KeyboardModifierState::default()),
+            "button release used stale keyboard modifiers"
+        );
     }
 
     #[test]
@@ -591,11 +953,11 @@ mod tests {
                     extended: false,
                 }),
                 InputCommand::Keyboard(KeyboardEvent::UnicodePressed('A' as u16)),
-                InputCommand::ReleaseHeldKeys,
+                InputCommand::ReleaseHeldInput,
             ],
         );
 
-        let release_suffix = &calls[calls.len() - 6..];
+        let release_suffix = &calls[calls.len() - 5..];
         assert_eq!(
             release_suffix,
             [
@@ -611,10 +973,6 @@ mod tests {
                     evdev_key: 29,
                     pressed: false,
                 },
-                SinkCall::Key {
-                    evdev_key: LEFT_SHIFT_KEY,
-                    pressed: false,
-                },
                 SinkCall::Modifiers(KeyboardModifierState::default()),
                 SinkCall::Flush,
             ]
@@ -624,7 +982,7 @@ mod tests {
     #[test]
     fn empty_session_end_is_a_noop() {
         let mut tracker = tracker();
-        assert!(run(&mut tracker, vec![InputCommand::ReleaseHeldKeys]).is_empty());
+        assert!(run(&mut tracker, vec![InputCommand::ReleaseHeldInput]).is_empty());
     }
 
     #[test]
@@ -728,7 +1086,7 @@ mod tests {
     fn run(tracker: &mut KeyboardStateTracker, commands: Vec<InputCommand>) -> Vec<SinkCall> {
         let mut sink = TestSink::default();
         let mut keymap_data = TEST_KEYMAP.to_vec();
-        let mut depressed = DepressedKeys::default();
+        let mut depressed = HeldInput::default();
         let epoch = Instant::now();
         for command in commands {
             handle_command(
@@ -872,7 +1230,7 @@ mod tests {
     }
 
     #[test]
-    fn physical_shift_release_keeps_unicode_owned_shift() {
+    fn unicode_release_preserves_a_later_raw_shift_owner() {
         let mut tracker = tracker();
         let calls = run(
             &mut tracker,
@@ -893,13 +1251,13 @@ mod tests {
         let key_calls = key_calls(&calls);
         assert_eq!(
             key_calls,
-            vec![(42, true), (30, true), (30, false), (42, false)]
+            vec![(30, true), (42, true), (30, false), (42, false)]
         );
         assert_eq!(tracker.modifier_state().depressed, 0);
     }
 
     #[test]
-    fn unicode_shift_repeat_press_single_release_neutralizes() {
+    fn unicode_repeat_press_has_one_wire_release() {
         let mut tracker = tracker();
         let calls = run(
             &mut tracker,
@@ -911,15 +1269,12 @@ mod tests {
         );
 
         let key_calls = key_calls(&calls);
-        assert_eq!(
-            key_calls,
-            vec![(42, true), (30, true), (30, true), (30, false), (42, false),]
-        );
+        assert_eq!(key_calls, vec![(30, true), (30, true), (30, false)]);
         assert_eq!(tracker.modifier_state().depressed, 0);
     }
 
     #[test]
-    fn unicode_shift_waits_for_all_distinct_owners() {
+    fn unicode_key_owners_release_independently() {
         let mut tracker = tracker();
         let calls = run(
             &mut tracker,
@@ -934,14 +1289,7 @@ mod tests {
         let key_calls = key_calls(&calls);
         assert_eq!(
             key_calls,
-            vec![
-                (42, true),
-                (30, true),
-                (48, true),
-                (30, false),
-                (48, false),
-                (42, false),
-            ]
+            vec![(30, true), (48, true), (30, false), (48, false),]
         );
         assert_eq!(tracker.modifier_state().depressed, 0);
     }
@@ -980,7 +1328,7 @@ mod tests {
             .expect("ctrl forwarded");
         let mouse_pos = calls
             .iter()
-            .position(|c| *c == SinkCall::Mouse)
+            .position(|call| matches!(call, SinkCall::Button { pressed: true, .. }))
             .expect("click forwarded");
         assert!(ctrl_pos < mouse_pos);
     }
@@ -1104,7 +1452,7 @@ mod tests {
     }
 
     #[test]
-    fn synchronize_releases_unicode_owned_shift() {
+    fn synchronize_clears_unicode_projection() {
         let mut tracker = tracker();
         let calls = run(
             &mut tracker,
@@ -1115,10 +1463,7 @@ mod tests {
         );
 
         let key_calls = key_calls(&calls);
-        assert_eq!(
-            key_calls,
-            vec![(42, true), (30, true), (30, false), (42, false)]
-        );
+        assert_eq!(key_calls, vec![(30, true), (30, false)]);
         assert_eq!(tracker.modifier_state().depressed, 0);
     }
 
@@ -1264,7 +1609,7 @@ mod tests {
 
         let mut sink = RejectingKeymapSink::default();
         let mut keymap_data = TEST_KEYMAP.to_vec();
-        let mut depressed = DepressedKeys::default();
+        let mut depressed = HeldInput::default();
         let epoch = Instant::now();
         handle_command(
             &mut tracker,
@@ -1516,9 +1861,9 @@ mod tests {
     }
 
     #[test]
-    fn unicode_shift_sequence_preserves_order() {
+    fn unicode_uses_selector_modifiers_before_key_requests() {
         let mut tracker = tracker();
-        // 'A' requires shift on the us layout.
+        // Unicode selects Shift through modifiers, without inventing a raw key owner.
         let calls = run(
             &mut tracker,
             vec![
@@ -1534,6 +1879,12 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(keys, vec![(42, true), (30, true), (30, false), (42, false)]);
+        assert_eq!(keys, vec![(30, true), (30, false)]);
+        assert!(matches!(calls.first(), Some(SinkCall::Modifiers(state)) if state.depressed != 0));
+        assert_eq!(tracker.modifier_state(), KeyboardModifierState::default());
     }
 }
+
+#[cfg(test)]
+#[path = "unicode_tests.rs"]
+mod unicode_tests;
