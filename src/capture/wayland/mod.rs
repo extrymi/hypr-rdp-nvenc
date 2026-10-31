@@ -21,9 +21,11 @@ use wayland_client::Connection;
 mod dmabuf_capture;
 mod ext;
 mod output;
+mod replay;
 mod state;
 mod wlr;
 
+pub(in crate::capture) use replay::CaptureReplay;
 use state::AppState;
 
 #[cfg(all(test, feature = "vaapi"))]

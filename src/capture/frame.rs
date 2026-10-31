@@ -2728,6 +2728,139 @@ mod tests {
         );
     }
 
+    fn replay_snapshot(data: &[u8]) -> crate::capture::scale::PreparedPresentationFrame<'_> {
+        crate::capture::scale::PreparedPresentationFrame {
+            data: std::borrow::Cow::Borrowed(data),
+            width: 64,
+            height: 64,
+            stride: 256,
+            damage_regions: vec![(0, 0, 64, 64)],
+            geometry_generation: 0,
+        }
+    }
+
+    fn replay_processor(shared: Arc<EgfxShared>) -> FrameProcessor {
+        FrameProcessor::new_with_h264_backend(
+            Some(shared),
+            64,
+            64,
+            PixelFormat::BgrA32,
+            256,
+            1_000_000,
+            23,
+            H264RateControl::Vbr,
+            30,
+            H264BackendPolicy::Software,
+        )
+    }
+
+    fn ext_retry_after_backpressure(pacer_first: bool) {
+        use crate::capture::wayland::CaptureReplay;
+
+        let (shared, mut bridge, _handle, _events, mut event_rx) =
+            crate::egfx::test_support::negotiated_avc420_session(64, 64, 1);
+        let (tx, mut bitmaps) = mpsc::channel(4);
+        let first = gradient_bgra_frame(64, 64, 256);
+        let second: Vec<u8> = first.iter().map(|byte| byte ^ 0x7f).collect();
+        let mut processor = replay_processor(Arc::clone(&shared));
+        let start = Instant::now();
+        let mut pacer = FramePacer::new(30, start);
+        let mut replay = CaptureReplay::new();
+        processor.queue_damage(&[(0, 0, 64, 64)]);
+        assert!(replay.submit(
+            replay_snapshot(&first),
+            &mut processor,
+            &mut pacer,
+            &tx,
+            start,
+        ));
+        let frame_id = drain_gfx_pdus(&mut event_rx).frame_id();
+        assert_eq!(shared.frame_flow_snapshot().frames_in_flight, 1);
+        processor.queue_damage(&[(0, 0, 64, 64)]);
+        let delay = if pacer_first {
+            Duration::from_millis(1)
+        } else {
+            Duration::from_secs(1)
+        };
+        assert!(replay.submit(
+            replay_snapshot(&second),
+            &mut processor,
+            &mut pacer,
+            &tx,
+            start + delay,
+        ));
+        assert!(replay.poll(
+            &mut processor,
+            &mut pacer,
+            &tx,
+            start + Duration::from_secs(2),
+        ));
+        assert!(processor.has_pending_damage());
+        drain_gfx_pdus(&mut event_rx).assert_no_encoded_frame();
+        ack_frame(&mut bridge, frame_id, TestQueueDepth::AvailableBytes(1));
+        assert!(replay.poll(
+            &mut processor,
+            &mut pacer,
+            &tx,
+            start + Duration::from_secs(3),
+        ));
+        assert!(
+            !processor.has_pending_damage(),
+            "EXT lost the last frame after ACK without new damage"
+        );
+        assert_eq!(processor.stats.sent_frames, 2);
+        drain_gfx_pdus(&mut event_rx).frame_id();
+        assert!(bitmaps.try_recv().is_err());
+    }
+
+    #[test]
+    fn ext_replay_retries_last_frame_after_ack_without_new_capture() {
+        ext_retry_after_backpressure(false);
+    }
+
+    #[test]
+    fn ext_replay_keeps_pacer_frame_until_backpressure_clears() {
+        ext_retry_after_backpressure(true);
+    }
+
+    #[test]
+    fn ext_replay_services_full_refresh_on_a_quiet_source() {
+        use crate::capture::wayland::CaptureReplay;
+
+        let (shared, mut bridge, _handle, _events, mut event_rx) =
+            crate::egfx::test_support::negotiated_avc420_session(64, 64, 1);
+        let (tx, _bitmaps) = mpsc::channel(4);
+        let frame = gradient_bgra_frame(64, 64, 256);
+        let mut processor = replay_processor(Arc::clone(&shared));
+        let start = Instant::now();
+        let mut pacer = FramePacer::new(30, start);
+        let mut replay = CaptureReplay::new();
+        processor.queue_damage(&[(0, 0, 64, 64)]);
+        assert!(replay.submit(
+            replay_snapshot(&frame),
+            &mut processor,
+            &mut pacer,
+            &tx,
+            start,
+        ));
+        let frame_id = drain_gfx_pdus(&mut event_rx).frame_id();
+        ack_frame(&mut bridge, frame_id, TestQueueDepth::AvailableBytes(1));
+        assert!(!processor.has_pending_damage());
+        shared.request_full_frame();
+        assert!(replay.poll(
+            &mut processor,
+            &mut pacer,
+            &tx,
+            start + Duration::from_secs(1),
+        ));
+        assert!(
+            !shared.full_frame_requested(),
+            "EXT ignored a quiet-source full refresh"
+        );
+        assert_eq!(processor.stats.sent_frames, 2);
+        drain_gfx_pdus(&mut event_rx).frame_id();
+    }
+
     #[test]
     fn frame_processor_keeps_repeated_capabilities_refresh_pending_until_ack_window_drains() {
         let width = 64;

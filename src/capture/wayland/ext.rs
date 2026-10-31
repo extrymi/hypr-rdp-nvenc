@@ -11,7 +11,7 @@ use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_captu
 #[cfg(feature = "vaapi")]
 use super::dmabuf_capture;
 use super::state::{AppState, ExtFrameFailure};
-use super::{create_shm_fd, poll_dispatch, CaptureInfo, MmapRegion, POLL_TIMEOUT_MS};
+use super::{create_shm_fd, poll_dispatch, CaptureInfo, CaptureReplay, MmapRegion, POLL_TIMEOUT_MS};
 use crate::capture::frame::{FramePacer, FrameProcessor};
 #[cfg(feature = "vaapi")]
 use crate::capture::scale::dmabuf_zero_copy_allowed;
@@ -274,10 +274,7 @@ pub(super) fn capture_loop_ext(
     conn.flush().context("Wayland flush failed")?;
 
     let mut failed_streak = 0u32;
-    // A frame the pacer skipped, retained so its damage still reaches the
-    // client if the screen then goes quiet (the buffer stays valid for the
-    // whole wait: the next capture writes into the other buffer).
-    let mut deferred: Option<crate::capture::scale::PreparedPresentationFrame<'_>> = None;
+    let mut replay = CaptureReplay::new();
     let mut tx_closed = false;
 
     loop {
@@ -291,21 +288,9 @@ pub(super) fn capture_loop_ext(
             if state.should_stop() {
                 break;
             }
-            // Flush a pacer-skipped frame once the pacing window opens; on a
-            // static screen no further capture completes to deliver it.
-            if let Some(pending) = deferred.as_ref() {
-                if frame_pacer.should_send(
-                    Instant::now(),
-                    proc.sent_first_frame,
-                    proc.has_pending_damage(),
-                    proc.pacing_fps(),
-                ) {
-                    if !proc.process(pending.data.as_ref(), &state.tx) {
-                        tx_closed = true;
-                        break;
-                    }
-                    deferred = None;
-                }
+            if !replay.poll(&mut proc, &mut frame_pacer, &state.tx, Instant::now()) {
+                tx_closed = true;
+                break;
             }
         }
         frame.destroy();
@@ -324,12 +309,11 @@ pub(super) fn capture_loop_ext(
         let completed_idx = cap_idx;
         let completed_damage_regions = state.damage_regions.clone();
 
-        // A failed capture does not refresh the deferred buffer. The next
-        // request can reuse that same mmap, so drop the borrow before any new
-        // buffer is submitted to the compositor. Pending damage remains in
-        // FrameProcessor and will be applied to the next successful frame.
+        // A completed capture supersedes the old snapshot. End its borrow
+        // before submitting that old buffer to the compositor again, including
+        // the failed-capture path. Pending damage stays in FrameProcessor.
+        replay.clear();
         if completed_failed {
-            super::discard_deferred_after_failed_capture(true, &mut deferred);
             match ext_frame_failure_action(completed_failure.unwrap_or(ExtFrameFailure::Unknown)) {
                 ExtFrameFailureAction::RestartSession => {
                     return Err(super::wlr::BufferParametersChanged.into());
@@ -366,8 +350,6 @@ pub(super) fn capture_loop_ext(
             continue;
         }
         failed_streak = 0;
-        // A fresh frame supersedes anything the pacer previously skipped.
-        deferred = None;
         let data = mmaps[completed_idx].as_slice();
         let snapshot = output_layout
             .snapshot()
@@ -405,27 +387,8 @@ pub(super) fn capture_loop_ext(
             false,
         );
 
-        // Always enforce frame rate limit. Without this, compositor animations
-        // (window open, cursor blink) flood the client with 60fps H.264 frames,
-        // overwhelming the decoder and building up a decode queue that delays
-        // all subsequent frames (including keystroke updates) by seconds.
-        let has_pending_damage = proc.has_pending_damage();
-        if !has_pending_damage && proc.sent_first_frame {
-            proc.stats
-                .record_no_damage_skip(prepared.width, prepared.height);
-        } else if frame_pacer.should_send(
-            Instant::now(),
-            proc.sent_first_frame,
-            has_pending_damage,
-            proc.pacing_fps(),
-        ) {
-            if !proc.process(prepared.data.as_ref(), &state.tx) {
-                break;
-            }
-        } else {
-            proc.stats
-                .record_pacer_skip(prepared.width, prepared.height);
-            deferred = Some(prepared);
+        if !replay.submit(prepared, &mut proc, &mut frame_pacer, &state.tx, Instant::now()) {
+            break;
         }
     }
 
