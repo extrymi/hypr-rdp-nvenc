@@ -1,8 +1,8 @@
 {
   "cases": [
     {
-      "id": "c6-after-config",
-      "revision": "fc419fe67d7bf0ea33d75366f499a48ec4366654",
+      "id": "r3-fa01-before",
+      "revision": "8a9466bb5318acda336989b6a90273212eeb0b4d",
       "cargo": [
         "--features",
         "nvenc",
@@ -10,29 +10,25 @@
         "hypr-rdp"
       ],
       "tests": {
-        "config::tests::args_debug_redacts_passwords": {
-          "result": "ok"
+        "capture::frame::tests::ext_replay_retries_last_frame_after_ack_without_new_capture": {
+          "result": "FAILED",
+          "messages": [
+            "EXT lost the last frame after ACK without new damage"
+          ]
         },
-        "config::tests::config_file_debug_redacts_passwords": {
-          "result": "ok"
+        "capture::frame::tests::ext_replay_keeps_pacer_frame_until_backpressure_clears": {
+          "result": "FAILED",
+          "messages": [
+            "EXT lost the last frame after ACK without new damage"
+          ]
         },
-        "config::tests::configured_credentials_debug_redacts_passwords": {
-          "result": "ok"
-        },
-        "config::tests::debug_preserves_absent_passwords": {
-          "result": "ok"
+        "capture::frame::tests::ext_replay_services_full_refresh_on_a_quiet_source": {
+          "result": "FAILED",
+          "messages": [
+            "EXT ignored a quiet-source full refresh"
+          ]
         }
-      },
-      "suites": [
-        {
-          "filter": "config::",
-          "min_passed": 63
-        },
-        {
-          "filter": "server::auth::tests::",
-          "min_passed": 2
-        }
-      ]
+      }
     }
   ]
 }
