@@ -817,6 +817,40 @@ mod tests {
     }
 
     #[test]
+    fn pointer_cleanup_publishes_released_modifiers_before_button_up() {
+        let mut tracker = tracker();
+        let calls = run(
+            &mut tracker,
+            vec![
+                InputCommand::Keyboard(KeyboardEvent::Pressed {
+                    code: 0x1d,
+                    extended: false,
+                }),
+                InputCommand::Mouse(MouseEvent::ButtonRel {
+                    x: 0,
+                    y: 0,
+                    button: MouseButton::Left,
+                    pressed: true,
+                }),
+                InputCommand::ReleaseHeldInput,
+            ],
+        );
+        let button_up = calls
+            .iter()
+            .position(|call| matches!(call, SinkCall::Button { pressed: false, .. }))
+            .expect("owned button released");
+        let before_up = calls[..button_up].iter().rev().find_map(|call| match call {
+            SinkCall::Modifiers(state) => Some(*state),
+            _ => None,
+        });
+        assert_eq!(
+            before_up,
+            Some(KeyboardModifierState::default()),
+            "button release used stale keyboard modifiers"
+        );
+    }
+
+    #[test]
     fn session_end_releases_all_key_owners_and_flushes() {
         let mut tracker = tracker();
         let calls = run(
