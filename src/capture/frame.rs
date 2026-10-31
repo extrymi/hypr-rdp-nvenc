@@ -487,6 +487,20 @@ impl FrameProcessor {
         !self.pending_damage_regions.is_empty()
     }
 
+    /// Work can arrive from the graphics channel while the source is quiet.
+    pub(super) fn has_pending_work(&self) -> bool {
+        !self.sent_first_frame
+            || self.has_pending_damage()
+            || self.egfx_shared.as_ref().is_some_and(|shared| {
+                shared.full_frame_requested() || shared.generation() != self.egfx_generation
+            })
+            || self.pending_initial_resize.is_some_and(|_| {
+                self.egfx_shared
+                    .as_ref()
+                    .is_none_or(|shared| shared.is_ready())
+            })
+    }
+
     pub(super) fn pacing_fps(&self) -> u32 {
         self.egfx_shared.as_ref().map_or(self.fps.max(1), |shared| {
             shared.preferred_frame_rate(self.fps)
@@ -634,14 +648,13 @@ impl FrameProcessor {
         self.process_at(data, tx, Instant::now())
     }
 
-    fn process_at(&mut self, data: &[u8], tx: &mpsc::Sender<DisplayUpdate>, now: Instant) -> bool {
-        let force_egfx_full_frame = self
-            .egfx_shared
-            .as_ref()
-            .is_some_and(|shared| shared.full_frame_requested());
-
-        // Skip frames with no damage (except the very first frame)
-        if self.sent_first_frame && !self.has_pending_damage() && !force_egfx_full_frame {
+    pub(super) fn process_at(
+        &mut self,
+        data: &[u8],
+        tx: &mpsc::Sender<DisplayUpdate>,
+        now: Instant,
+    ) -> bool {
+        if !self.has_pending_work() {
             return true;
         }
 
@@ -2726,6 +2739,279 @@ mod tests {
                 .and_then(crate::egfx::FrameEncoder::force_idr_requests_for_test),
             force_idr_requests
         );
+    }
+
+    fn replay_snapshot(data: &[u8]) -> crate::capture::scale::PreparedPresentationFrame<'_> {
+        crate::capture::scale::PreparedPresentationFrame {
+            data: std::borrow::Cow::Borrowed(data),
+            width: 64,
+            height: 64,
+            stride: 256,
+            damage_regions: vec![(0, 0, 64, 64)],
+            geometry_generation: 0,
+        }
+    }
+
+    fn replay_processor(shared: Arc<EgfxShared>) -> FrameProcessor {
+        FrameProcessor::new_with_h264_backend(
+            Some(shared),
+            64,
+            64,
+            PixelFormat::BgrA32,
+            256,
+            1_000_000,
+            23,
+            H264RateControl::Vbr,
+            30,
+            H264BackendPolicy::Software,
+        )
+    }
+
+    fn ext_retry_after_backpressure(pacer_first: bool) {
+        use crate::capture::wayland::CaptureReplay;
+
+        let (shared, mut bridge, _handle, _events, mut event_rx) =
+            crate::egfx::test_support::negotiated_avc420_session(64, 64, 1);
+        let (tx, mut bitmaps) = mpsc::channel(4);
+        let first = gradient_bgra_frame(64, 64, 256);
+        let second: Vec<u8> = first.iter().map(|byte| byte ^ 0x7f).collect();
+        let mut processor = replay_processor(Arc::clone(&shared));
+        let start = Instant::now();
+        let mut pacer = FramePacer::new(30, start);
+        let mut replay = CaptureReplay::new();
+        processor.queue_damage(&[(0, 0, 64, 64)]);
+        assert!(replay.submit(
+            replay_snapshot(&first),
+            &mut processor,
+            &mut pacer,
+            &tx,
+            start,
+        ));
+        let frame_id = drain_gfx_pdus(&mut event_rx).frame_id();
+        assert_eq!(shared.frame_flow_snapshot().frames_in_flight, 1);
+        processor.queue_damage(&[(0, 0, 64, 64)]);
+        let delay = if pacer_first {
+            Duration::from_millis(1)
+        } else {
+            Duration::from_secs(1)
+        };
+        assert!(replay.submit(
+            replay_snapshot(&second),
+            &mut processor,
+            &mut pacer,
+            &tx,
+            start + delay,
+        ));
+        assert!(replay.poll(
+            &mut processor,
+            &mut pacer,
+            &tx,
+            start + Duration::from_secs(2),
+        ));
+        assert!(processor.has_pending_damage());
+        drain_gfx_pdus(&mut event_rx).assert_no_encoded_frame();
+        ack_frame(&mut bridge, frame_id, TestQueueDepth::AvailableBytes(1));
+        assert!(replay.poll(
+            &mut processor,
+            &mut pacer,
+            &tx,
+            start + Duration::from_secs(3),
+        ));
+        assert!(
+            !processor.has_pending_damage(),
+            "EXT lost the last frame after ACK without new damage"
+        );
+        assert_eq!(processor.stats.sent_frames, 2);
+        drain_gfx_pdus(&mut event_rx).frame_id();
+        assert!(bitmaps.try_recv().is_err());
+    }
+
+    #[test]
+    fn ext_replay_retries_last_frame_after_ack_without_new_capture() {
+        ext_retry_after_backpressure(false);
+    }
+
+    #[test]
+    fn ext_replay_keeps_pacer_frame_until_backpressure_clears() {
+        ext_retry_after_backpressure(true);
+    }
+
+    #[test]
+    fn ext_replay_services_full_refresh_on_a_quiet_source() {
+        use crate::capture::wayland::CaptureReplay;
+
+        let (shared, mut bridge, _handle, _events, mut event_rx) =
+            crate::egfx::test_support::negotiated_avc420_session(64, 64, 1);
+        let (tx, _bitmaps) = mpsc::channel(4);
+        let frame = gradient_bgra_frame(64, 64, 256);
+        let mut processor = replay_processor(Arc::clone(&shared));
+        let start = Instant::now();
+        let mut pacer = FramePacer::new(30, start);
+        let mut replay = CaptureReplay::new();
+        processor.queue_damage(&[(0, 0, 64, 64)]);
+        assert!(replay.submit(
+            replay_snapshot(&frame),
+            &mut processor,
+            &mut pacer,
+            &tx,
+            start,
+        ));
+        let frame_id = drain_gfx_pdus(&mut event_rx).frame_id();
+        ack_frame(&mut bridge, frame_id, TestQueueDepth::AvailableBytes(1));
+        assert!(!processor.has_pending_damage());
+        shared.request_full_frame();
+        assert!(replay.poll(
+            &mut processor,
+            &mut pacer,
+            &tx,
+            start + Duration::from_secs(1),
+        ));
+        assert!(
+            !shared.full_frame_requested(),
+            "EXT ignored a quiet-source full refresh"
+        );
+        assert_eq!(processor.stats.sent_frames, 2);
+        drain_gfx_pdus(&mut event_rx).frame_id();
+    }
+
+    fn ext_late_graphics_ready(bitmap_first: bool) {
+        use crate::capture::wayland::CaptureReplay;
+
+        let mut session = unnegotiated_egfx_session(64, 64, EgfxCodecPolicy::Avc420);
+        let (tx, mut bitmaps) = mpsc::channel(4);
+        let frame = gradient_bgra_frame(64, 64, 256);
+        let mut processor = replay_processor(Arc::clone(&session.shared));
+        let start = Instant::now();
+        let mut pacer = FramePacer::new(30, start);
+        let mut replay = CaptureReplay::new();
+        processor.queue_damage(&[(0, 0, 64, 64)]);
+        assert!(replay.submit(
+            replay_snapshot(&frame),
+            &mut processor,
+            &mut pacer,
+            &tx,
+            start,
+        ));
+        assert!(!processor.sent_first_frame);
+        if bitmap_first {
+            assert!(replay.poll(&mut processor, &mut pacer, &tx, start + GFX_READY_GRACE,));
+            assert!(bitmaps.try_recv().is_ok());
+            assert!(processor.sent_first_frame);
+            assert!(!processor.has_pending_damage());
+        }
+        start_gfx_channel(&mut session.bridge);
+        process_avc420_capabilities(&mut session.bridge);
+        assert!(replay.poll(
+            &mut processor,
+            &mut pacer,
+            &tx,
+            start + GFX_READY_GRACE + Duration::from_secs(1),
+        ));
+        drain_gfx_pdus(&mut session.event_rx).frame_id();
+        assert!(!processor.has_pending_work());
+        assert!(bitmaps.try_recv().is_err());
+    }
+
+    #[test]
+    fn ext_replay_retries_when_graphics_becomes_ready_without_capture() {
+        ext_late_graphics_ready(false);
+    }
+
+    #[test]
+    fn ext_replay_activates_late_graphics_after_bitmap_grace() {
+        ext_late_graphics_ready(true);
+    }
+
+    #[test]
+    fn ext_replay_stays_idle_and_clears_snapshot_before_buffer_reuse() {
+        use crate::capture::wayland::CaptureReplay;
+
+        let (shared, mut bridge, _handle, _events, mut event_rx) =
+            crate::egfx::test_support::negotiated_avc420_session(64, 64, 1);
+        let (tx, _bitmaps) = mpsc::channel(4);
+        let frame = gradient_bgra_frame(64, 64, 256);
+        let mut processor = replay_processor(Arc::clone(&shared));
+        let start = Instant::now();
+        let mut pacer = FramePacer::new(30, start);
+        let mut replay = CaptureReplay::new();
+        processor.queue_damage(&[(0, 0, 64, 64)]);
+        assert!(replay.submit(
+            replay_snapshot(&frame),
+            &mut processor,
+            &mut pacer,
+            &tx,
+            start,
+        ));
+        let frame_id = drain_gfx_pdus(&mut event_rx).frame_id();
+        ack_frame(&mut bridge, frame_id, TestQueueDepth::AvailableBytes(1));
+        for seconds in 1..4 {
+            assert!(replay.poll(
+                &mut processor,
+                &mut pacer,
+                &tx,
+                start + Duration::from_secs(seconds),
+            ));
+            assert_eq!(processor.stats.sent_frames, 1);
+            drain_gfx_pdus(&mut event_rx).assert_no_encoded_frame();
+        }
+        replay.clear();
+        shared.request_full_frame();
+        assert!(replay.poll(
+            &mut processor,
+            &mut pacer,
+            &tx,
+            start + Duration::from_secs(4),
+        ));
+        assert!(shared.full_frame_requested());
+        drain_gfx_pdus(&mut event_rx).assert_no_encoded_frame();
+        assert!(replay.submit(
+            replay_snapshot(&frame),
+            &mut processor,
+            &mut pacer,
+            &tx,
+            start + Duration::from_secs(5),
+        ));
+        assert!(!shared.full_frame_requested());
+        assert_eq!(processor.stats.sent_frames, 2);
+        drain_gfx_pdus(&mut event_rx).frame_id();
+    }
+
+    #[test]
+    fn ext_replay_stops_on_initial_resize_or_closed_bitmap_channel() {
+        use crate::capture::wayland::CaptureReplay;
+
+        for resize in [false, true] {
+            let shared = unnegotiated_egfx_shared(64, 64, EgfxCodecPolicy::Avc420);
+            let mut processor = replay_processor(shared);
+            processor.egfx_shared = None;
+            if resize {
+                processor.set_pending_initial_resize(Some(DesktopSize {
+                    width: 64,
+                    height: 64,
+                }));
+            }
+            let (tx, rx) = mpsc::channel(4);
+            drop(rx);
+            let frame = gradient_bgra_frame(64, 64, 256);
+            let start = Instant::now();
+            let mut pacer = FramePacer::new(30, start);
+            let mut replay = CaptureReplay::new();
+            processor.queue_damage(&[(0, 0, 64, 64)]);
+            assert!(!replay.submit(
+                replay_snapshot(&frame),
+                &mut processor,
+                &mut pacer,
+                &tx,
+                start,
+            ));
+            // Terminal false must discard the snapshot, so no retry follows.
+            assert!(replay.poll(
+                &mut processor,
+                &mut pacer,
+                &tx,
+                start + Duration::from_secs(1),
+            ));
+        }
     }
 
     #[test]
