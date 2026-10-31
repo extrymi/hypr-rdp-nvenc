@@ -1,8 +1,8 @@
 {
   "cases": [
     {
-      "id": "r3-fa01-after",
-      "revision": "5db41b0e6d4ecd5a9a306e5beaeb8c341c166c4b",
+      "id": "r3-fa02-before",
+      "revision": "4341831b517dbbe234b51ca9a3861048ece6246a",
       "cargo": [
         "--features",
         "nvenc",
@@ -30,6 +30,24 @@
         },
         "capture::frame::tests::ext_replay_stops_on_initial_resize_or_closed_bitmap_channel": {
           "result": "ok"
+        },
+        "input::actor::tests::session_end_releases_remote_buttons_before_next_client_event": {
+          "result": "FAILED",
+          "messages": [
+            "session end left remote pointer buttons held"
+          ]
+        },
+        "input::actor::tests::actor_shutdown_releases_remote_buttons": {
+          "result": "FAILED",
+          "messages": [
+            "actor shutdown left remote pointer buttons held"
+          ]
+        },
+        "input::actor::tests::pointer_cleanup_does_not_require_a_held_keyboard_key": {
+          "result": "FAILED",
+          "messages": [
+            "mouse-only cleanup left the pointer button held"
+          ]
         }
       }
     }
