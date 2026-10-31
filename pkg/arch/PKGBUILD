@@ -1,0 +1,79 @@
+# NVIDIA fork; upstream authors and MIT notices are retained in the source.
+pkgname=hypr-rdp-nvenc
+pkgver=0.1.7.nvenc5
+pkgrel=1
+pkgdesc='RDP server for an existing Hyprland session with optional native NVIDIA encoding (experimental)'
+arch=('x86_64')
+url='https://github.com/extrymi/hypr-rdp-nvenc'
+license=('MIT')
+provides=('hypr-rdp=0.1.7')
+conflicts=('hypr-rdp' 'hypr-rdp-git')
+backup=('etc/pam.d/hypr-rdp')
+options=(!debug !lto)
+depends=('glibc' 'gcc-libs' 'pam' 'fuse3' 'libpulse' 'libva' 'libxkbcommon' 'mesa' 'pipewire' 'wayland' 'systemd' 'openssl' 'util-linux')
+makedepends=('cargo' 'git' 'clang' 'cmake' 'pkgconf' 'python')
+optdepends=(
+    'nvidia-utils>=610: native NVENC API 13.1; also requires a matching supported kernel driver'
+    'intel-media-driver: VA-API encoding on Intel'
+    'libva-mesa-driver: VA-API encoding on AMD'
+)
+# The runtime commit passed the CPU CI baseline before it was pinned here.
+# Packaging files below are separate checked sources, so this recipe does not
+# need its own commit SHA.
+_commit=fc5d59a0481ee39fa01a4f3c0d0b9a9dc5f977ad
+source=(
+    "hypr-rdp::git+https://github.com/extrymi/hypr-rdp-nvenc.git#commit=$_commit"
+    'hypr-rdp-nvenc.service'
+    'config.example.toml'
+    'hypr-rdp-tls'
+    'arch-package.md'
+    'collect-licenses.py'
+    'supplemental-licenses.json'
+)
+sha256sums=('SKIP' 'c23dbe1e716d011ae26a4b49d6f5fa3d97ae5ea88a15b6625a5353dc432f5815' 'e93544b6c1024b76ce3f1b368db2dec43b74734a8a9fb93f21cd3da682e1c3c1' '0e8aef6f35f4387a11277d59c7d71e046e6c7c15a15201daa3c5808af0b7fabe' '370e9fd99769449e97ffa58e57c3e655763a97ece9aa0a8dee24b3fe29743477' 'db68d03a8480069ad0852e920a0b46ee0134efedfa94d0256459f5a32a887515' '007ee4d66a397f8fe1ae327e84d89da21de70315d319923f5bdd94425cb068e9')
+
+prepare() {
+    cd "$srcdir/hypr-rdp"
+    [[ $(git rev-parse HEAD) == "$_commit" ]]
+    export RUSTUP_TOOLCHAIN=1.99.1
+    # Metadata/notice collection also reads target-specific locked packages.
+    cargo fetch --locked
+}
+
+build() {
+    cd "$srcdir/hypr-rdp"
+    export RUSTUP_TOOLCHAIN=1.99.1 CARGO_TARGET_DIR="$srcdir/target"
+    # Upstream's bundled C codecs do not accept all makepkg linker flags.
+    unset CFLAGS CXXFLAGS CPPFLAGS LDFLAGS
+    cargo build --frozen --release --features nvenc
+    cargo metadata --frozen --features nvenc --format-version 1 \
+        --filter-platform x86_64-unknown-linux-gnu > "$srcdir/cargo-metadata.json"
+    python "$srcdir/collect-licenses.py" "$srcdir/cargo-metadata.json" "$srcdir/dependency-licenses" \
+        "$srcdir/supplemental-licenses.json"
+}
+
+check() {
+    cd "$srcdir/hypr-rdp"
+    export RUSTUP_TOOLCHAIN=1.99.1 CARGO_TARGET_DIR="$srcdir/target"
+    unset CFLAGS CXXFLAGS CPPFLAGS LDFLAGS
+    # Offline/CPU fixtures only. Do not invoke a compositor or NVIDIA driver.
+    cargo test --frozen --features nvenc --lib --bin hypr-rdp --test startup --test nvenc_entry --test nvenc_worker
+}
+
+package() {
+    cd "$srcdir/hypr-rdp"
+    install -Dm755 "$srcdir/target/release/hypr-rdp" "$pkgdir/usr/bin/hypr-rdp"
+    install -Dm755 "$srcdir/hypr-rdp-tls" "$pkgdir/usr/bin/hypr-rdp-tls"
+    install -Dm644 pkg/pam/hypr-rdp.arch "$pkgdir/etc/pam.d/hypr-rdp"
+    install -Dm644 "$srcdir/hypr-rdp-nvenc.service" "$pkgdir/usr/lib/systemd/user/hypr-rdp-nvenc.service"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    for file in README.md CHANGELOG.md docs/native-nvenc.md docs/nvenc-integration.md docs/startup-validation.md; do
+        install -Dm644 "$file" "$pkgdir/usr/share/doc/$pkgname/${file##*/}"
+    done
+    install -Dm644 "$srcdir/config.example.toml" "$pkgdir/usr/share/doc/$pkgname/config.example.toml"
+    install -Dm644 "$srcdir/arch-package.md" "$pkgdir/usr/share/doc/$pkgname/arch-package.md"
+    for file in vendor/nv-codec-headers/*; do
+        install -Dm644 "$file" "$pkgdir/usr/share/licenses/$pkgname/nv-codec-headers/${file##*/}"
+    done
+    cp -r "$srcdir/dependency-licenses" "$pkgdir/usr/share/licenses/$pkgname/"
+}

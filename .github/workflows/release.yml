@@ -12,6 +12,9 @@ env:
 
 jobs:
   build:
+    # Upstream release pipeline. In a fork it would publish a non-NVENC binary
+    # built without --locked; the fork has no release pipeline yet.
+    if: github.repository == 'MuNeNiCK/hypr-rdp'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
